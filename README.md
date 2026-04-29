@@ -1,6 +1,6 @@
 # teacher-video · AnimAgent
 
-> **AI Math Animation Generator** — the engine behind [VideoTutor](https://videotutor.io)'s "one sentence to animation" experience.
+> **AI Math Animation Generator** 
 
 Type a SAT/AP math concept → AnimAgent generates, validates, and renders a personalized animated explanation through a closed **Generate → Execute → Validate → Fix** loop.
 
