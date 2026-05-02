@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { evaluate } from "mathjs";
 import { AnimationSpec, AnimationStep } from "@/lib/agent/types";
+import { useAnimationController } from "./useAnimationController";
 
 interface Props {
   spec?: AnimationSpec;
@@ -17,6 +18,7 @@ interface Props {
     play: string;
     pause: string;
     replay: string;
+    speed: string;
   };
 }
 
@@ -265,11 +267,6 @@ export default function AnimationPlayer({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
-  const elapsedRef = useRef<number>(0);
-  const lastFrameRef = useRef<number>(0);
-  const [progress, setProgress] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(autoPlay);
   const [canvasSize, setCanvasSize] = useState({ width: 680, height: 420, dpr: 1 });
 
   const specRef = useRef(spec);
@@ -279,14 +276,8 @@ export default function AnimationPlayer({
     play: controls?.play ?? "Play",
     pause: controls?.pause ?? "Pause",
     replay: controls?.replay ?? "Replay",
+    speed: controls?.speed ?? "Speed",
   };
-
-  useEffect(() => {
-    elapsedRef.current = 0;
-    lastFrameRef.current = 0;
-    setProgress(0);
-    setIsPlaying(autoPlay && !!spec);
-  }, [autoPlay, spec]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -337,9 +328,6 @@ export default function AnimationPlayer({
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const totalT = Math.min(1, elapsed / (specRef.current.durationMs || 5000));
-    setProgress(totalT);
-
     // Bounds calculation
     const defaultBounds = { xMin: -5, xMax: 5, yMin: -2, yMax: 10 };
     const graphStep = specRef.current.steps.find(s => s.toolName === "drawFunctionGraph" || s.toolName === "drawTangentLine" || s.toolName === "drawLimitApproach");
@@ -367,67 +355,11 @@ export default function AnimationPlayer({
     });
   }, [canvasSize]);
 
-  const renderFn = useCallback((ts: number) => {
-    if (!specRef.current) return;
-
-    if (lastFrameRef.current === 0) lastFrameRef.current = ts;
-    const delta = ts - lastFrameRef.current;
-    lastFrameRef.current = ts;
-
-    const duration = specRef.current.durationMs || 5000;
-    elapsedRef.current = Math.min(duration, elapsedRef.current + delta);
-    renderAtElapsed(elapsedRef.current);
-
-    if (elapsedRef.current < duration) {
-      rafRef.current = requestAnimationFrame(renderFn);
-    } else {
-      setIsPlaying(false);
-      lastFrameRef.current = 0;
-    }
-  }, [renderAtElapsed]);
-
-  useEffect(() => {
-    if (isPlaying && spec) {
-      lastFrameRef.current = 0;
-      rafRef.current = requestAnimationFrame(renderFn);
-    } else {
-      cancelAnimationFrame(rafRef.current);
-      lastFrameRef.current = 0;
-    }
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying, spec, renderFn]);
-
-  useEffect(() => {
-    if (spec && !isPlaying) {
-      renderAtElapsed(elapsedRef.current);
-    }
-  }, [spec, isPlaying, renderAtElapsed]);
-
-  const handlePlayPause = () => {
-    if (!spec) return;
-    const duration = spec.durationMs || 5000;
-    if (elapsedRef.current >= duration) {
-      elapsedRef.current = 0;
-    }
-    setIsPlaying((playing) => !playing);
-  };
-
-  const handleReplay = () => {
-    if (!spec) return;
-    elapsedRef.current = 0;
-    setProgress(0);
-    renderAtElapsed(0);
-    setIsPlaying(true);
-  };
-
-  const handleSeek = (nextProgress: number) => {
-    if (!spec) return;
-    const duration = spec.durationMs || 5000;
-    const nextElapsed = duration * nextProgress;
-    elapsedRef.current = nextElapsed;
-    setProgress(nextProgress);
-    renderAtElapsed(nextElapsed);
-  };
+  const controller = useAnimationController({
+    autoPlay: autoPlay && !!spec,
+    durationMs: spec?.durationMs || 5000,
+    onFrame: renderAtElapsed,
+  });
 
   if (!spec) return null;
 
@@ -442,16 +374,16 @@ export default function AnimationPlayer({
       <div className="w-full border-t border-slate-100 bg-white/95 px-3 py-2 flex items-center gap-3">
         <button
           type="button"
-          onClick={handlePlayPause}
-          title={isPlaying ? labels.pause : labels.play}
-          aria-label={isPlaying ? labels.pause : labels.play}
+          onClick={controller.togglePlay}
+          title={controller.isPlaying ? labels.pause : labels.play}
+          aria-label={controller.isPlaying ? labels.pause : labels.play}
           className="h-8 w-8 shrink-0 rounded-full bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition inline-flex items-center justify-center shadow-sm"
         >
-          {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+          {controller.isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
         </button>
         <button
           type="button"
-          onClick={handleReplay}
+          onClick={controller.replay}
           title={labels.replay}
           aria-label={labels.replay}
           className="h-8 w-8 shrink-0 rounded-full border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 active:scale-95 transition inline-flex items-center justify-center"
@@ -462,13 +394,26 @@ export default function AnimationPlayer({
           type="range"
           min="0"
           max="1000"
-          value={Math.round(progress * 1000)}
-          onChange={(event) => handleSeek(Number(event.target.value) / 1000)}
+          value={Math.round(controller.progress * 1000)}
+          onChange={(event) => controller.seek(Number(event.target.value) / 1000)}
           aria-label="Animation progress"
           className="min-w-0 flex-1 accent-blue-600"
         />
+        <label className="flex shrink-0 items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+          {labels.speed}
+          <select
+            value={controller.playbackRate}
+            onChange={(event) => controller.setPlaybackRate(Number(event.target.value))}
+            className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value={0.5}>0.5x</option>
+            <option value={1}>1x</option>
+            <option value={1.5}>1.5x</option>
+            <option value={2}>2x</option>
+          </select>
+        </label>
         <div className="text-[10px] font-black text-slate-400 tabular-nums w-10 text-right">
-          {Math.round(progress * 100)}%
+          {Math.round(controller.progress * 100)}%
         </div>
       </div>
     </div>

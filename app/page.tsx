@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { Copy, History, Sparkles } from "lucide-react";
+import { Copy, History, Sparkles, Star, Volume2, VolumeX } from "lucide-react";
 import AgentInspector, { AgentLog } from "@/components/agent/AgentInspector";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import GenerationSkeleton from "@/components/animation/GenerationSkeleton";
@@ -38,6 +38,7 @@ interface HistoryItem {
 }
 
 const HISTORY_KEY = "animagent.history.v1";
+const RATING_KEY = "animagent.ratings.v1";
 
 function encodeShareSpec(spec: AnimationSpec): string {
   return btoa(unescape(encodeURIComponent(JSON.stringify(spec))))
@@ -63,6 +64,8 @@ export default function HomePage() {
   const [lang, setLang] = useState<Language>("zh");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [shareCopied, setShareCopied] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const t = translations[lang];
 
@@ -130,6 +133,47 @@ export default function HomePage() {
     setShareCopied(true);
     window.setTimeout(() => setShareCopied(false), 1600);
   };
+
+  const rateCurrentAnimation = (score: number) => {
+    if (!result?.spec) return;
+    const ratings = JSON.parse(window.localStorage.getItem(RATING_KEY) || "[]") as Array<{
+      concept: string;
+      score: number;
+      createdAt: string;
+    }>;
+    const next = [
+      { concept: result.spec.concept, score, createdAt: new Date().toISOString() },
+      ...ratings,
+    ].slice(0, 50);
+    window.localStorage.setItem(RATING_KEY, JSON.stringify(next));
+    setRating(score);
+  };
+
+  const toggleNarration = () => {
+    if (!result?.spec || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(result.spec.narration.join(" "));
+    utterance.lang = lang === "zh" ? "zh-CN" : "en-US";
+    utterance.rate = 0.95;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  };
+
+  useEffect(() => {
+    setRating(0);
+    setIsSpeaking(false);
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, [result?.spec?.concept]);
 
   const handleGenerate = async (query?: string) => {
     const q = query ?? input;
@@ -311,14 +355,24 @@ export default function HomePage() {
                   ))}
                 </div>
                 {result?.spec && (
-                  <button
-                    type="button"
-                    onClick={shareCurrentAnimation}
-                    className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white hover:bg-blue-700 transition"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {shareCopied ? (lang === "zh" ? "已复制" : "Copied") : (lang === "zh" ? "复制分享" : "Share")}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleNarration}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-600 hover:border-blue-200 hover:text-blue-600 transition"
+                    >
+                      {isSpeaking ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+                      {isSpeaking ? (lang === "zh" ? "停止" : "Stop") : (lang === "zh" ? "朗读" : "Speak")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={shareCurrentAnimation}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white hover:bg-blue-700 transition"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {shareCopied ? (lang === "zh" ? "已复制" : "Copied") : (lang === "zh" ? "复制分享" : "Share")}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -387,11 +441,26 @@ export default function HomePage() {
                     </svg>
                   </div>
                   <h3 className="font-bold text-slate-700 text-[11px] uppercase tracking-wider">{t.narrationScript}</h3>
+                  <div className="ml-auto flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <button
+                        key={score}
+                        type="button"
+                        onClick={() => rateCurrentAnimation(score)}
+                        aria-label={`${score} star rating`}
+                        className={`transition ${score <= rating ? "text-amber-500" : "text-slate-300 hover:text-amber-400"}`}
+                      >
+                        <Star className="h-3.5 w-3.5" fill={score <= rating ? "currentColor" : "none"} />
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex gap-4 overflow-x-auto pb-1 custom-scrollbar scrollbar-thin">
                   {result.spec.narration.map((line, i) => (
                     <div key={i} className="flex-none w-[260px] p-3 rounded-xl bg-slate-50 border border-slate-100 relative group hover:border-blue-200 transition-colors">
-                      <span className="text-[9px] font-black text-blue-500/20 absolute top-2 right-3 italic">STEP {i+1}</span>
+                      <span className="text-[9px] font-black text-blue-500/20 absolute top-2 right-3 italic">
+                        {i === 0 ? (lang === "zh" ? "引入" : "HOOK") : i === result.spec!.narration.length - 1 ? (lang === "zh" ? "总结" : "WRAP") : (lang === "zh" ? "演示" : "DEMO")}
+                      </span>
                       <p className="text-slate-600 text-[11px] leading-relaxed line-clamp-2 italic">
                         "{line}"
                       </p>

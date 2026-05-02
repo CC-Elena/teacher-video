@@ -9,6 +9,7 @@
 
 import { AnimationSpec } from "./types";
 import { TOOL_NAMES } from "../components/animationTools";
+import { evaluate, parse } from "mathjs";
 
 export interface ValidationResult {
   valid: boolean;
@@ -63,6 +64,32 @@ export function validateSpec(spec: unknown): ValidationResult {
     }
     if (typeof step.durationMs !== "number" || step.durationMs < 100) {
       errors.push(`步骤 ${i}: 'durationMs' 必须至少为 100ms`);
+    }
+
+    if (step.params?.expression) {
+      const expression = String(step.params.expression);
+      try {
+        parse(expression);
+        for (const sampleX of [-2, -0.5, 0.5, 2]) {
+          const value = evaluate(expression, {
+            x: sampleX,
+            sin: Math.sin,
+            cos: Math.cos,
+            tan: Math.tan,
+            sqrt: Math.sqrt,
+            abs: Math.abs,
+            pi: Math.PI,
+            e: Math.E,
+            log: Math.log,
+            pow: Math.pow,
+          });
+          if (typeof value !== "number" || Number.isNaN(value)) {
+            warnings.push(`步骤 ${i}: expression 在 x=${sampleX} 处不能得到数值`);
+          }
+        }
+      } catch (error) {
+        errors.push(`步骤 ${i}: expression 不是有效的 mathjs 表达式 (${String(error)})`);
+      }
     }
 
     // 工具特定的必需参数

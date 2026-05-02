@@ -30,6 +30,16 @@ describe("validateSpec", () => {
     expect(result.errors.join("\n")).toContain("未知工具名称");
   });
 
+  it("rejects invalid math expressions", () => {
+    const spec = structuredClone(getDemoSpec("derivative"));
+    spec.steps[0].params.expression = "sin(";
+
+    const result = validateSpec(spec);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toContain("mathjs");
+  });
+
   it("parses JSON wrapped in a markdown code fence", () => {
     const spec = getDemoSpec("integral area");
     const parsed = parseSpecFromLLMResponse(`\`\`\`json\n${JSON.stringify(spec)}\n\`\`\``);

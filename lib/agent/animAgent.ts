@@ -14,7 +14,7 @@ import OpenAI from "openai";
 import { AnimationSpec, AgentState, GenerationMetrics } from "./types";
 import {
   SYSTEM_PROMPT,
-  FEW_SHOT_EXAMPLES,
+  selectFewShotExamples,
   buildUserPrompt,
 } from "./prompts";
 import { validateSpec, parseSpecFromLLMResponse } from "./validator";
@@ -138,7 +138,7 @@ export class AnimAgent {
     previousSpec?: string
   ): Promise<string> {
     // 构建 Few-shot 消息
-    const fewShotMessages: OpenAI.Chat.ChatCompletionMessageParam[] = FEW_SHOT_EXAMPLES.flatMap(
+    const fewShotMessages: OpenAI.Chat.ChatCompletionMessageParam[] = selectFewShotExamples(userInput).flatMap(
       (ex) => [
         { role: "user" as const, content: ex.user },
         { role: "assistant" as const, content: JSON.stringify(ex.spec, null, 2) },

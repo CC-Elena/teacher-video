@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getDemoSpec } from "../demoSpec";
 import { generateAnimationCode } from "../codeGenerator";
+import { selectFewShotExamples } from "../prompts";
 
 describe("generateAnimationCode", () => {
   it("emits a default renderer module for valid specs", () => {
@@ -22,5 +23,12 @@ describe("generateAnimationCode", () => {
     const code = generateAnimationCode(getDemoSpec("limit as x approaches 2"));
 
     expect(code).toContain("renderDrawLimitApproach");
+  });
+
+  it("selects relevant few-shot examples from the template library", () => {
+    const examples = selectFewShotExamples("show a limit as x approaches 2");
+
+    expect(examples[0].spec.animationType).toBe("limit");
+    expect(examples).toHaveLength(3);
   });
 });
