@@ -9,10 +9,50 @@ export const maxDuration = 60;
 
 const GENERATION_TIMEOUT_MS = 18000;
 
+class GenerationTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`Generation timed out after ${ms}ms`);
+    this.name = "GenerationTimeoutError";
+  }
+}
+
 function timeoutAfter(ms: number): Promise<never> {
   return new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(`Generation timed out after ${ms}ms`)), ms);
+    setTimeout(() => reject(new GenerationTimeoutError(ms)), ms);
   });
+}
+
+function classifyGenerationError(err: unknown) {
+  if (err instanceof GenerationTimeoutError) {
+    return {
+      status: "timeout",
+      zh: "实时生成超过 18 秒，已切换到本地演示动画。",
+      en: "Live generation exceeded 18 seconds; using a local demo animation.",
+    };
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+  if (/fetch|network|ECONN|ENOTFOUND|ETIMEDOUT|timeout/i.test(message)) {
+    return {
+      status: "network_error",
+      zh: "模型服务网络连接失败，已切换到本地演示动画。",
+      en: "The model service network request failed; using a local demo animation.",
+    };
+  }
+
+  if (/401|403|api key|unauthorized|forbidden/i.test(message)) {
+    return {
+      status: "auth_error",
+      zh: "模型 API 鉴权失败，已切换到本地演示动画。",
+      en: "Model API authentication failed; using a local demo animation.",
+    };
+  }
+
+  return {
+    status: "generation_error",
+    zh: "实时生成暂时不可用，已切换到本地演示动画。",
+    en: "Live generation is unavailable; using a local demo animation.",
+  };
 }
 
 function createDemoResult(userInput: string, startedAt: number) {
@@ -93,11 +133,11 @@ export async function POST(req: NextRequest) {
         send({ type: "result", ...result });
       } catch (err) {
         console.error("[AnimAgent]", err);
+        const classified = classifyGenerationError(err);
+        send({ type: "status", status: classified.status });
         send({
           type: "log",
-          message: lang === "zh"
-            ? "实时生成暂时不可用，已切换到本地演示动画。"
-            : "Live generation is unavailable; using a local demo animation.",
+          message: lang === "zh" ? classified.zh : classified.en,
         });
         send({ type: "result", ...createDemoResult(userInput, startedAt) });
       } finally {

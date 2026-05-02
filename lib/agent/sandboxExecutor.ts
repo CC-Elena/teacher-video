@@ -1,11 +1,13 @@
 /**
- * Sandbox Executor — Enhanced code execution safety check
- * 
- * Replaces the old simulateExecution() with a more thorough analysis.
- * In a production environment, this would use vm2/Worker isolation.
- * For now, we do deep structural + safety validation.
+ * 沙盒执行器 — 隔离执行 + 安全检查
+ *
+ * 生成代码会先经过静态安全扫描，再被 TypeScript 转译为 CommonJS，
+ * 最后放进 node:vm 隔离上下文中加载。vm 设置了短超时，并只暴露
+ * 最小必要的全局对象，避免把生成代码直接运行在主应用上下文里。
  */
 
+import vm from "node:vm";
+import ts from "typescript";
 import { AnimationSpec } from "./types";
 
 export interface SandboxResult {
@@ -17,7 +19,7 @@ export interface SandboxResult {
 }
 
 /**
- * Dangerous patterns that must never appear in generated code
+ * 绝对不能出现在生成代码中的危险模式
  */
 const DANGER_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\beval\s*\(/, label: "eval()" },
@@ -36,15 +38,15 @@ const DANGER_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
 ];
 
 /**
- * Required structural elements in generated code
+ * 生成代码中必须包含的结构元素
  */
 const REQUIRED_ELEMENTS = [
-  { pattern: /export\s+default/, label: "'export default' function" },
-  { pattern: /AnimationSpec/, label: "AnimationSpec type reference" },
+  { pattern: /export\s+default/, label: "'export default' 函数" },
+  { pattern: /AnimationSpec/, label: "AnimationSpec 类型引用" },
 ];
 
 /**
- * Validate that spec steps timeline is consistent
+ * 验证 spec 步骤的时间线是否一致
  */
 function validateTimeline(spec: AnimationSpec): string[] {
   const warnings: string[] = [];
@@ -52,14 +54,14 @@ function validateTimeline(spec: AnimationSpec): string[] {
   for (let i = 0; i < spec.steps.length; i++) {
     const step = spec.steps[i];
     if (step.startMs + step.durationMs > spec.durationMs * 1.2) {
-      warnings.push(`Step ${i} (${step.toolName}) extends 20%+ beyond total duration`);
+      warnings.push(`步骤 ${i} (${step.toolName}) 超出总时长 20% 以上`);
     }
     if (step.durationMs < 100) {
-      warnings.push(`Step ${i} (${step.toolName}) has very short duration: ${step.durationMs}ms`);
+      warnings.push(`步骤 ${i} (${step.toolName}) 的持续时间太短：${step.durationMs}ms`);
     }
   }
 
-  // Check for overlapping steps of same type
+  // 检查相同类型的步骤是否有重叠
   for (let i = 0; i < spec.steps.length; i++) {
     for (let j = i + 1; j < spec.steps.length; j++) {
       if (spec.steps[i].toolName === spec.steps[j].toolName) {
@@ -67,7 +69,7 @@ function validateTimeline(spec: AnimationSpec): string[] {
         const bStart = spec.steps[j].startMs;
         if (aEnd > bStart && spec.steps[i].startMs < bStart + spec.steps[j].durationMs) {
           warnings.push(
-            `Steps ${i} and ${j} (both ${spec.steps[i].toolName}) have overlapping timelines`
+            `步骤 ${i} 和 ${j} (均为 ${spec.steps[i].toolName}) 的时间线存在重叠`
           );
         }
       }
@@ -77,30 +79,26 @@ function validateTimeline(spec: AnimationSpec): string[] {
   return warnings;
 }
 
-/**
- * Execute sandbox validation on generated code + spec
- */
-export function executeSandbox(code: string, spec: AnimationSpec): SandboxResult {
+function validateExpressions(spec: AnimationSpec): SandboxResult | null {
   const start = Date.now();
-  const warnings: string[] = [];
 
-  // 1. Empty code check
-  if (!code.trim()) {
-    return {
-      success: false,
-      error: "Generated code is empty",
-      errorType: "structural",
-      warnings: [],
-      executionTimeMs: Date.now() - start,
-    };
-  }
+  for (const step of spec.steps) {
+    if (!step.params.expression) continue;
 
-  // 2. Safety scan
-  for (const { pattern, label } of DANGER_PATTERNS) {
-    if (pattern.test(code)) {
+    const expr = String(step.params.expression);
+    if (/[;{}]/.test(expr)) {
       return {
         success: false,
-        error: `Unsafe pattern detected: ${label}`,
+        error: `表达式包含可疑字符: "${expr}"`,
+        errorType: "safety",
+        warnings: [],
+        executionTimeMs: Date.now() - start,
+      };
+    }
+    if (/\b(import|require|process|global|window|document|constructor|prototype|Function|eval)\b/.test(expr)) {
+      return {
+        success: false,
+        error: `表达式包含不允许的标识符: "${expr}"`,
         errorType: "safety",
         warnings: [],
         executionTimeMs: Date.now() - start,
@@ -108,12 +106,116 @@ export function executeSandbox(code: string, spec: AnimationSpec): SandboxResult
     }
   }
 
-  // 3. Structural requirements
+  return null;
+}
+
+function compileInVm(code: string): { success: boolean; error?: string } {
+  const output = ts.transpileModule(code, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+      isolatedModules: true,
+    },
+    reportDiagnostics: true,
+  });
+
+  const diagnostics = output.diagnostics ?? [];
+  const blockingDiagnostic = diagnostics.find((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+  if (blockingDiagnostic) {
+    return {
+      success: false,
+      error: ts.flattenDiagnosticMessageText(blockingDiagnostic.messageText, "\n"),
+    };
+  }
+
+  const generatedModule = { exports: {} as Record<string, unknown> };
+  const sandboxRequire = (name: string) => {
+    if (name === "mathjs") {
+      return {
+        evaluate: (expr: string, scope: Record<string, unknown>) => {
+          const x = Number(scope.x ?? 0);
+          if (expr === "x") return x;
+          if (expr === "x^2") return x * x;
+          if (expr === "x^3") return x * x * x;
+          if (expr === "sin(x)") return Math.sin(x);
+          if (expr === "cos(x)") return Math.cos(x);
+          return 0;
+        },
+      };
+    }
+    if (name === "@/lib/agent/types") return {};
+    throw new Error(`沙盒禁止 require("${name}")`);
+  };
+
+  const context = vm.createContext({
+    module: generatedModule,
+    exports: generatedModule.exports,
+    require: sandboxRequire,
+    console: { error: () => undefined, log: () => undefined, warn: () => undefined },
+    Math,
+    Number,
+    String,
+    Boolean,
+    Array,
+    Object,
+    isFinite,
+    NaN,
+  });
+
+  try {
+    const script = new vm.Script(output.outputText, {
+      filename: "animagent-generated.cjs",
+    });
+    script.runInContext(context, { timeout: 200 });
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+
+  if (typeof generatedModule.exports.default !== "function") {
+    return { success: false, error: "代码加载后没有导出默认组件函数" };
+  }
+
+  return { success: true };
+}
+
+/**
+ * 对生成的代码 + spec 执行沙盒验证
+ */
+export function executeSandbox(code: string, spec: AnimationSpec): SandboxResult {
+  const start = Date.now();
+  const warnings: string[] = [];
+
+  // 1. 空代码检查
+  if (!code.trim()) {
+    return {
+      success: false,
+      error: "生成的代码为空",
+      errorType: "structural",
+      warnings: [],
+      executionTimeMs: Date.now() - start,
+    };
+  }
+
+  // 2. 安全扫描
+  for (const { pattern, label } of DANGER_PATTERNS) {
+    if (pattern.test(code)) {
+      return {
+        success: false,
+        error: `检测到不安全模式: ${label}`,
+        errorType: "safety",
+        warnings: [],
+        executionTimeMs: Date.now() - start,
+      };
+    }
+  }
+
+  // 3. 结构要求
   for (const { pattern, label } of REQUIRED_ELEMENTS) {
     if (!pattern.test(code)) {
       return {
         success: false,
-        error: `Code missing required element: ${label}`,
+        error: `代码缺少必要元素: ${label}`,
         errorType: "structural",
         warnings: [],
         executionTimeMs: Date.now() - start,
@@ -121,29 +223,31 @@ export function executeSandbox(code: string, spec: AnimationSpec): SandboxResult
     }
   }
 
-  // 4. Code size check (suspiciously large code may indicate issues)
+  // 4. 代码大小检查 (异常大的代码可能预示着问题)
   if (code.length > 50000) {
-    warnings.push(`Generated code is unusually large: ${code.length} bytes`);
+    warnings.push(`生成的代码异常大：${code.length} 字节`);
   }
 
-  // 5. Timeline validation
+  // 5. 时间线验证
   const timelineWarnings = validateTimeline(spec);
   warnings.push(...timelineWarnings);
 
-  // 6. Expression safety check for known tool types
-  for (const step of spec.steps) {
-    if (step.params.expression) {
-      const expr = String(step.params.expression);
-      if (/[;{}]/.test(expr)) {
-        return {
-          success: false,
-          error: `Expression contains suspicious characters: "${expr}"`,
-          errorType: "safety",
-          warnings,
-          executionTimeMs: Date.now() - start,
-        };
-      }
-    }
+  // 6. 已知工具类型的表达式安全检查
+  const expressionError = validateExpressions(spec);
+  if (expressionError) {
+    return { ...expressionError, warnings, executionTimeMs: Date.now() - start };
+  }
+
+  // 7. 在隔离 VM 中加载转译后的模块，捕获语法和初始化错误
+  const vmResult = compileInVm(code);
+  if (!vmResult.success) {
+    return {
+      success: false,
+      error: `沙盒加载失败: ${vmResult.error}`,
+      errorType: "structural",
+      warnings,
+      executionTimeMs: Date.now() - start,
+    };
   }
 
   return {

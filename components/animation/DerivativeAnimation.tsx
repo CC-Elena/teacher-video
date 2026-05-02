@@ -6,13 +6,18 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Pause, Play, RotateCcw } from "lucide-react";
+import { evaluate } from "mathjs";
 import { AnimationSpec, AnimationStep } from "@/lib/agent/types";
 
 interface Props {
   spec?: AnimationSpec;
-  width?: number;
-  height?: number;
   autoPlay?: boolean;
+  controls?: {
+    play: string;
+    pause: string;
+    replay: string;
+  };
 }
 
 // ── Math helpers ────────────────────────────────────────────────────────────
@@ -25,13 +30,8 @@ function evalExpr(expr: string, x: number): number {
     e: Math.E, log: Math.log, pow: Math.pow,
   };
   try {
-    const jsExpr = expr.replace(/\^/g, "**")
-                     .replace(/(\d)([a-zA-Z(])/g, "$1*$2")
-                     .replace(/(\))(\d)/g, "$1*$2");
-    
-    const fn = new Function(...Object.keys(safeScope), `"use strict"; return (${jsExpr});`);
-    const result = fn(...Object.values(safeScope));
-    return isFinite(result) ? result : NaN;
+    const result = evaluate(expr, safeScope);
+    return typeof result === "number" && isFinite(result) ? result : NaN;
   } catch (e) {
     console.error("Math eval error:", e, expr);
     return NaN;
@@ -134,8 +134,33 @@ function renderHighlightIntegralArea(ctx: CanvasRenderingContext2D, params: Reco
   const fromX = Number(params.fromX ?? 0);
   const toX = Number(params.toX ?? 3);
   const fillUpTo = fromX + (toX - fromX) * progress;
+  const fillColor = String(params.fillColor ?? "rgba(59, 130, 246, 0.3)");
+  const showBars = params.showRiemannBars === true;
+  const numBars = Math.max(2, Number(params.numBars ?? 8));
+
+  if (showBars) {
+    const barWidth = (toX - fromX) / numBars;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, progress * 1.5);
+    ctx.fillStyle = "rgba(14, 165, 233, 0.18)";
+    ctx.strokeStyle = "rgba(14, 116, 144, 0.55)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < numBars; i++) {
+      const x0 = fromX + i * barWidth;
+      if (x0 > fillUpTo) break;
+      const sampleX = x0 + barWidth / 2;
+      const barHeight = evalExpr(expr, sampleX);
+      const left = toCanvasX(x0, bounds, w);
+      const right = toCanvasX(x0 + barWidth, bounds, w);
+      const top = toCanvasY(barHeight, bounds, h);
+      const base = toCanvasY(0, bounds, h);
+      ctx.fillRect(left, Math.min(top, base), right - left, Math.abs(base - top));
+      ctx.strokeRect(left, Math.min(top, base), right - left, Math.abs(base - top));
+    }
+    ctx.restore();
+  }
   
-  ctx.fillStyle = "rgba(59, 130, 246, 0.3)";
+  ctx.fillStyle = fillColor;
   ctx.beginPath();
   ctx.moveTo(toCanvasX(fromX, bounds, w), toCanvasY(0, bounds, h));
   for (let xi = fromX; xi <= fillUpTo; xi += (toX - fromX) / 100) {
@@ -145,6 +170,54 @@ function renderHighlightIntegralArea(ctx: CanvasRenderingContext2D, params: Reco
   ctx.lineTo(toCanvasX(fillUpTo, bounds, w), toCanvasY(0, bounds, h));
   ctx.closePath();
   ctx.fill();
+}
+
+function renderDrawLimitApproach(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number, bounds: Bounds) {
+  const expr = String(params.expression ?? "x^2");
+  const approachX = Number(params.approachX ?? 0);
+  const leftStartX = Number(params.leftStartX ?? bounds.xMin);
+  const rightStartX = Number(params.rightStartX ?? bounds.xMax);
+  const color = String(params.color ?? "#E11D48");
+  const eased = 1 - Math.pow(1 - progress, 3);
+  const leftX = leftStartX + (approachX - leftStartX) * eased;
+  const rightX = rightStartX + (approachX - rightStartX) * eased;
+  const limitY = evalExpr(expr, approachX);
+  const leftY = evalExpr(expr, leftX);
+  const rightY = evalExpr(expr, rightX);
+  const targetCx = toCanvasX(approachX, bounds, w);
+  const targetCy = toCanvasY(limitY, bounds, h);
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(225, 29, 72, 0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 6]);
+  ctx.beginPath(); ctx.moveTo(targetCx, 0); ctx.lineTo(targetCx, h); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, targetCy); ctx.lineTo(w, targetCy); ctx.stroke();
+  ctx.setLineDash([]);
+
+  [
+    { x: leftX, y: leftY, label: "left" },
+    { x: rightX, y: rightY, label: "right" },
+  ].forEach((point) => {
+    const px = toCanvasX(point.x, bounds, w);
+    const py = toCanvasY(point.y, bounds, h);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "#881337";
+    ctx.font = "bold 12px monospace";
+    ctx.fillText(point.label, px + 10, py - 10);
+  });
+
+  ctx.fillStyle = "#111827";
+  ctx.font = "bold 14px monospace";
+  if (params.showTargetLabel !== false) {
+    ctx.fillText(`x -> ${approachX}`, targetCx + 10, h - 18);
+    ctx.fillText(`f(x) -> ${Number.isFinite(limitY) ? limitY.toFixed(2) : "?"}`, targetCx + 10, targetCy - 12);
+  }
+  ctx.restore();
 }
 
 function renderAddMathLabel(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number, bounds: Bounds) {
@@ -179,6 +252,7 @@ function renderStep(ctx: CanvasRenderingContext2D, step: AnimationStep, progress
     case "drawFunctionGraph": renderDrawFunctionGraph(ctx, step.params, progress, w, h, bounds); break;
     case "drawTangentLine": renderDrawTangentLine(ctx, step.params, progress, w, h, bounds); break;
     case "highlightIntegralArea": renderHighlightIntegralArea(ctx, step.params, progress, w, h, bounds); break;
+    case "drawLimitApproach": renderDrawLimitApproach(ctx, step.params, progress, w, h, bounds); break;
     case "addMathLabel": renderAddMathLabel(ctx, step.params, progress, w, h, bounds); break;
     case "showStepByStep": renderShowStepByStep(ctx, step.params, progress, w, h); break;
   }
@@ -186,38 +260,89 @@ function renderStep(ctx: CanvasRenderingContext2D, step: AnimationStep, progress
 
 export default function AnimationPlayer({
   spec,
-  width = 680,
-  height = 420,
   autoPlay = true,
+  controls,
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
-  const startTimeRef = useRef<number>(0);
+  const elapsedRef = useRef<number>(0);
+  const lastFrameRef = useRef<number>(0);
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
+  const [canvasSize, setCanvasSize] = useState({ width: 680, height: 420, dpr: 1 });
 
   const specRef = useRef(spec);
   useEffect(() => { specRef.current = spec; }, [spec]);
 
+  const labels = {
+    play: controls?.play ?? "Play",
+    pause: controls?.pause ?? "Pause",
+    replay: controls?.replay ?? "Replay",
+  };
+
   useEffect(() => {
-    startTimeRef.current = 0;
+    elapsedRef.current = 0;
+    lastFrameRef.current = 0;
     setProgress(0);
     setIsPlaying(autoPlay && !!spec);
   }, [autoPlay, spec]);
 
-  const renderFn = useCallback((ts: number) => {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      const rect = container.getBoundingClientRect();
+      const nextWidth = Math.max(320, Math.floor(rect.width));
+      const nextHeight = Math.max(220, Math.floor(rect.height));
+      const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
+      setCanvasSize((current) => {
+        if (
+          current.width === nextWidth &&
+          current.height === nextHeight &&
+          current.dpr === nextDpr
+        ) {
+          return current;
+        }
+        return { width: nextWidth, height: nextHeight, dpr: nextDpr };
+      });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const renderAtElapsed = useCallback((elapsed: number) => {
     if (!canvasRef.current || !specRef.current) return;
     const ctx = canvasRef.current.getContext("2d");
     if (!ctx) return;
 
-    if (startTimeRef.current === 0) startTimeRef.current = ts;
-    const elapsed = ts - startTimeRef.current;
+    const { width, height, dpr } = canvasSize;
+    const backingWidth = Math.round(width * dpr);
+    const backingHeight = Math.round(height * dpr);
+    if (canvasRef.current.width !== backingWidth) {
+      canvasRef.current.width = backingWidth;
+    }
+    if (canvasRef.current.height !== backingHeight) {
+      canvasRef.current.height = backingHeight;
+    }
+    if (canvasRef.current.style.width !== `${width}px`) {
+      canvasRef.current.style.width = `${width}px`;
+    }
+    if (canvasRef.current.style.height !== `${height}px`) {
+      canvasRef.current.style.height = `${height}px`;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     const totalT = Math.min(1, elapsed / (specRef.current.durationMs || 5000));
     setProgress(totalT);
 
     // Bounds calculation
     const defaultBounds = { xMin: -5, xMax: 5, yMin: -2, yMax: 10 };
-    const graphStep = specRef.current.steps.find(s => s.toolName === "drawFunctionGraph" || s.toolName === "drawTangentLine");
+    const graphStep = specRef.current.steps.find(s => s.toolName === "drawFunctionGraph" || s.toolName === "drawTangentLine" || s.toolName === "drawLimitApproach");
     const bounds = graphStep ? {
       xMin: Number(graphStep.params.xMin ?? -5),
       xMax: Number(graphStep.params.xMax ?? 5),
@@ -240,43 +365,111 @@ export default function AnimationPlayer({
         renderStep(ctx, step, stepProgress, width, height, bounds);
       }
     });
+  }, [canvasSize]);
 
-    if (totalT < 1) {
+  const renderFn = useCallback((ts: number) => {
+    if (!specRef.current) return;
+
+    if (lastFrameRef.current === 0) lastFrameRef.current = ts;
+    const delta = ts - lastFrameRef.current;
+    lastFrameRef.current = ts;
+
+    const duration = specRef.current.durationMs || 5000;
+    elapsedRef.current = Math.min(duration, elapsedRef.current + delta);
+    renderAtElapsed(elapsedRef.current);
+
+    if (elapsedRef.current < duration) {
       rafRef.current = requestAnimationFrame(renderFn);
     } else {
       setIsPlaying(false);
+      lastFrameRef.current = 0;
     }
-  }, [width, height]);
+  }, [renderAtElapsed]);
 
   useEffect(() => {
     if (isPlaying && spec) {
+      lastFrameRef.current = 0;
       rafRef.current = requestAnimationFrame(renderFn);
     } else {
       cancelAnimationFrame(rafRef.current);
+      lastFrameRef.current = 0;
     }
     return () => cancelAnimationFrame(rafRef.current);
   }, [isPlaying, spec, renderFn]);
 
+  useEffect(() => {
+    if (spec && !isPlaying) {
+      renderAtElapsed(elapsedRef.current);
+    }
+  }, [spec, isPlaying, renderAtElapsed]);
+
+  const handlePlayPause = () => {
+    if (!spec) return;
+    const duration = spec.durationMs || 5000;
+    if (elapsedRef.current >= duration) {
+      elapsedRef.current = 0;
+    }
+    setIsPlaying((playing) => !playing);
+  };
+
+  const handleReplay = () => {
+    if (!spec) return;
+    elapsedRef.current = 0;
+    setProgress(0);
+    renderAtElapsed(0);
+    setIsPlaying(true);
+  };
+
+  const handleSeek = (nextProgress: number) => {
+    if (!spec) return;
+    const duration = spec.durationMs || 5000;
+    const nextElapsed = duration * nextProgress;
+    elapsedRef.current = nextElapsed;
+    setProgress(nextProgress);
+    renderAtElapsed(nextElapsed);
+  };
+
   if (!spec) return null;
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-white p-2">
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="max-w-full max-h-full object-contain shadow-sm rounded-lg"
-      />
-      <div className="w-full max-w-[500px] mt-4 flex items-center gap-4">
-        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-blue-600 transition-all duration-75" 
-            style={{ width: `${progress * 100}%` }}
-          />
-        </div>
-        <span className="text-[10px] font-black text-slate-400 tabular-nums w-8">
+    <div className="w-full h-full flex flex-col bg-white">
+      <div ref={containerRef} className="min-h-0 flex-1">
+        <canvas
+          ref={canvasRef}
+          className="block w-full h-full"
+        />
+      </div>
+      <div className="w-full border-t border-slate-100 bg-white/95 px-3 py-2 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handlePlayPause}
+          title={isPlaying ? labels.pause : labels.play}
+          aria-label={isPlaying ? labels.pause : labels.play}
+          className="h-8 w-8 shrink-0 rounded-full bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition inline-flex items-center justify-center shadow-sm"
+        >
+          {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+        </button>
+        <button
+          type="button"
+          onClick={handleReplay}
+          title={labels.replay}
+          aria-label={labels.replay}
+          className="h-8 w-8 shrink-0 rounded-full border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 active:scale-95 transition inline-flex items-center justify-center"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
+        <input
+          type="range"
+          min="0"
+          max="1000"
+          value={Math.round(progress * 1000)}
+          onChange={(event) => handleSeek(Number(event.target.value) / 1000)}
+          aria-label="Animation progress"
+          className="min-w-0 flex-1 accent-blue-600"
+        />
+        <div className="text-[10px] font-black text-slate-400 tabular-nums w-10 text-right">
           {Math.round(progress * 100)}%
-        </span>
+        </div>
       </div>
     </div>
   );

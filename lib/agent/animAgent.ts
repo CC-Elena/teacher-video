@@ -1,13 +1,13 @@
 /**
- * AnimAgent Core
- * Implements the Generate → Execute → Validate → Fix loop
+ * AnimAgent 核心
+ * 实现 生成 → 执行 → 验证 → 修复 循环
  *
- * Flow:
- *   1. parseIntent: NL → AnimationSpec (with LLM)
- *   2. validate: check spec validity
- *   3. generateCode: AnimationSpec → TypeScript render code
- *   4. execute: run in sandbox (simulate here; real impl uses vm/iframe)
- *   5. On failure: inject error + retry (max N times)
+ * 流程：
+ *   1. parseIntent: 自然语言 → AnimationSpec (使用 LLM)
+ *   2. validate: 检查 spec 的有效性
+ *   3. generateCode: AnimationSpec → TypeScript 渲染代码
+ *   4. execute: 在沙盒中运行 (此处模拟运行；实际实现使用 vm/iframe)
+ *   5. 失败时：注入错误并重试 (最多 N 次)
  */
 
 import OpenAI from "openai";
@@ -19,6 +19,7 @@ import {
 } from "./prompts";
 import { validateSpec, parseSpecFromLLMResponse } from "./validator";
 import { generateAnimationCode } from "./codeGenerator";
+import { executeSandbox } from "./sandboxExecutor";
 
 export class AnimAgent {
   private client: OpenAI;
@@ -35,7 +36,7 @@ export class AnimAgent {
   }
 
   /**
-   * Main entry point: takes user NL input → returns final AnimationSpec + code
+   * 主入口：获取用户自然语言输入 → 返回最终的 AnimationSpec + 代码
    */
   async run(
     userInput: string,
@@ -62,7 +63,7 @@ export class AnimAgent {
         ? `第 ${attempt} 次尝试：开始生成动画...` 
         : `Attempt #${attempt}: Starting animation generation...`);
 
-      // ── Step 1: Generate AnimationSpec via LLM ──────────────────────────
+      // ── 步骤 1: 通过 LLM 生成 AnimationSpec ──────────────────────────
       let spec: AnimationSpec;
       let specJson: string;
       try {
@@ -75,13 +76,13 @@ export class AnimAgent {
         specJson = JSON.stringify(spec, null, 2);
         lastSpecJson = specJson;
       } catch (err) {
-        const msg = `JSON parse error: ${String(err)}`;
+        const msg = `JSON 解析错误: ${String(err)}`;
         metrics.errorsEncountered.push(msg);
         lastError = msg;
         continue;
       }
 
-      // ── Step 2: Validate spec ───────────────────────────────────────────
+      // ── 步骤 2: 验证 spec ───────────────────────────────────────────
       onProgress?.({ status: "validating" });
       onLog?.(lang === "zh" ? `正在验证 AnimationSpec 结构...` : `Validating AnimationSpec structure...`);
       const validation = validateSpec(spec);
@@ -96,15 +97,13 @@ export class AnimAgent {
         continue;
       }
 
-      // ── Step 3: Generate executable TypeScript code ──────────────────────
+      // ── 步骤 3: 生成可执行的 TypeScript 代码 ──────────────────────
       onLog?.(lang === "zh" ? `正在生成 TypeScript React 组件代码...` : `Generating TypeScript React component code...`);
       const code = generateAnimationCode(spec);
 
-      // ── Step 4: Simulate execution (sandbox check) ───────────────────────
-      // In production this runs in a vm2 / iframe sandbox.
-      // Here we do a structural sanity check.
+      // ── 步骤 4: 沙盒执行检查 ───────────────────────
       onLog?.(lang === "zh" ? `正在执行沙盒安全检查...` : `Executing sandbox safety check...`);
-      const execResult = simulateExecution(code);
+      const execResult = executeSandbox(code, spec);
       if (!execResult.success) {
         const msg = lang === "zh" 
           ? `执行错误：${execResult.error}` 
@@ -116,7 +115,7 @@ export class AnimAgent {
         continue;
       }
 
-      // ── Success ─────────────────────────────────────────────────────────
+      // ── 成功 ─────────────────────────────────────────────────────────
       if (attempt === 1) metrics.pass1Success = true;
       metrics.totalDurationMs = Date.now() - startTime;
       onLog?.(lang === "zh" 
@@ -129,7 +128,7 @@ export class AnimAgent {
 
     metrics.totalDurationMs = Date.now() - startTime;
     throw new Error(
-      `AnimAgent failed after ${maxAttempts} attempts. Last error: ${lastError}`
+      `AnimAgent 在 ${maxAttempts} 次尝试后失败。最后一次错误: ${lastError}`
     );
   }
 
@@ -138,7 +137,7 @@ export class AnimAgent {
     previousError?: string,
     previousSpec?: string
   ): Promise<string> {
-    // Build few-shot messages
+    // 构建 Few-shot 消息
     const fewShotMessages: OpenAI.Chat.ChatCompletionMessageParam[] = FEW_SHOT_EXAMPLES.flatMap(
       (ex) => [
         { role: "user" as const, content: ex.user },
@@ -156,33 +155,9 @@ export class AnimAgent {
       model: this.model,
       messages,
       response_format: { type: "json_object" },
-      temperature: 0.3, // Low temp for stable structured output
+      temperature: 0.3, // 低温以获得稳定的结构化输出
     });
 
     return response.choices[0]?.message?.content ?? "";
   }
-}
-
-/**
- * Lightweight structural check on generated code.
- * Real impl: run in isolated vm2 or Worker with timeout.
- */
-function simulateExecution(code: string): { success: boolean; error?: string } {
-  if (!code.trim()) {
-    return { success: false, error: "Generated code is empty" };
-  }
-  if (!code.includes("export default")) {
-    return { success: false, error: "Code missing 'export default' function" };
-  }
-  if (!code.includes("AnimationSpec")) {
-    return { success: false, error: "Code does not reference AnimationSpec type" };
-  }
-  // Check for unsafe patterns
-  const dangerPatterns = [/eval\s*\(/, /process\.exit/, /require\s*\(/];
-  for (const p of dangerPatterns) {
-    if (p.test(code)) {
-      return { success: false, error: `Unsafe pattern detected: ${p.source}` };
-    }
-  }
-  return { success: true };
 }

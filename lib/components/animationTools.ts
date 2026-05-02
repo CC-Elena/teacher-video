@@ -111,6 +111,26 @@ export const ANIMATION_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "drawLimitApproach",
+    description:
+      "Animate two points approaching a target x value from the left and right. " +
+      "Use this to teach one-sided and two-sided limits.",
+    parameters: {
+      type: "object",
+      properties: {
+        expression: { type: "string", description: "The function expression" },
+        approachX: { type: "number", description: "The x value being approached" },
+        leftStartX: { type: "number", description: "Starting x value for the left-side point" },
+        rightStartX: { type: "number", description: "Starting x value for the right-side point" },
+        yMin: { type: "number", description: "Bottom boundary of y-axis" },
+        yMax: { type: "number", description: "Top boundary of y-axis" },
+        color: { type: "string", description: "Color for the approaching points and guide lines" },
+        showTargetLabel: { type: "boolean", description: "Show the target x and limit value labels" },
+      },
+      required: ["expression", "approachX"],
+    },
+  },
+  {
     name: "addMathLabel",
     description:
       "Add a LaTeX-style math annotation at a specific position on the canvas. " +

@@ -3,8 +3,12 @@
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import { Copy, History, Sparkles } from "lucide-react";
 import AgentInspector, { AgentLog } from "@/components/agent/AgentInspector";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import GenerationSkeleton from "@/components/animation/GenerationSkeleton";
 import { translations, Language } from "@/lib/i18n";
+import { ANIMATION_TEMPLATES } from "@/lib/agent/templates";
 
 // Dynamic import to avoid SSR issues with Canvas
 const DerivativeAnimation = dynamic(
@@ -26,12 +30,30 @@ interface GenerateResult {
   error?: string;
 }
 
-const EXAMPLE_PROMPTS = [
-  "Show how the derivative of x² equals 2x",
-  "Explain the area under sin(x) from 0 to π",
-  "Why is the derivative of x³ equal to 3x²?",
-  "Visualize how limits work as x approaches 2",
-];
+interface HistoryItem {
+  id: string;
+  query: string;
+  spec: AnimationSpec;
+  createdAt: string;
+}
+
+const HISTORY_KEY = "animagent.history.v1";
+
+function encodeShareSpec(spec: AnimationSpec): string {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(spec))))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function decodeShareSpec(encoded: string): AnimationSpec | null {
+  try {
+    const padded = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+    return JSON.parse(decodeURIComponent(escape(atob(padded)))) as AnimationSpec;
+  } catch {
+    return null;
+  }
+}
 
 export default function HomePage() {
   const [input, setInput] = useState("");
@@ -39,6 +61,8 @@ export default function HomePage() {
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [animKey, setAnimKey] = useState(0);
   const [lang, setLang] = useState<Language>("zh");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const t = translations[lang];
 
@@ -52,6 +76,59 @@ export default function HomePage() {
       ...prev,
       { id: Math.random().toString(36).substr(2, 9), message, timestamp: new Date() }
     ]);
+  };
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(HISTORY_KEY);
+    if (saved) {
+      try {
+        setHistory(JSON.parse(saved).slice(0, 10));
+      } catch {
+        window.localStorage.removeItem(HISTORY_KEY);
+      }
+    }
+
+    const shared = new URLSearchParams(window.location.search).get("spec");
+    if (shared) {
+      const sharedSpec = decodeShareSpec(shared);
+      if (sharedSpec) {
+        setResult({ spec: sharedSpec, demoMode: true });
+        setInput(sharedSpec.concept);
+        setAgentStatus("done");
+        setAgentLogs([
+          { id: "shared-spec", message: lang === "zh" ? "已从分享 URL 加载动画。" : "Loaded animation from share URL.", timestamp: new Date() },
+        ]);
+      }
+    }
+  }, [lang]);
+
+  const rememberResult = (query: string, spec: AnimationSpec) => {
+    setHistory((items) => {
+      const next = [
+        { id: `${Date.now()}`, query, spec, createdAt: new Date().toISOString() },
+        ...items.filter((item) => item.spec.concept !== spec.concept || item.query !== query),
+      ].slice(0, 10);
+      window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const loadHistoryItem = (item: HistoryItem) => {
+    setInput(item.query);
+    setResult({ spec: item.spec, demoMode: true });
+    setAnimKey((k) => k + 1);
+    setAgentStatus("done");
+    addLog(lang === "zh" ? `已从历史记录加载：${item.spec.concept}` : `Loaded from history: ${item.spec.concept}`);
+  };
+
+  const shareCurrentAnimation = async () => {
+    if (!result?.spec) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("spec", encodeShareSpec(result.spec));
+    window.history.replaceState(null, "", url.toString());
+    await navigator.clipboard.writeText(url.toString());
+    setShareCopied(true);
+    window.setTimeout(() => setShareCopied(false), 1600);
   };
 
   const handleGenerate = async (query?: string) => {
@@ -101,6 +178,7 @@ export default function HomePage() {
               setResult(chunk);
               setAnimKey((k) => k + 1);
               setAgentStatus("done");
+              if (chunk.spec) rememberResult(q, chunk.spec);
             } else if (chunk.type === "error") {
               setResult({ error: chunk.error });
               setAgentStatus("error");
@@ -196,19 +274,54 @@ export default function HomePage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {EXAMPLE_PROMPTS.map((p) => (
+                    {ANIMATION_TEMPLATES.map((template) => {
+                      const p = lang === "zh" ? template.promptZh : template.prompt;
+                      return (
                       <button
-                        key={p}
+                        key={template.id}
                         onClick={() => { setInput(p); handleGenerate(p); }}
                         className="text-[9px] font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-400 hover:bg-blue-600 hover:text-white transition-all border border-slate-200/50 truncate max-w-[140px]"
                       >
                         {p}
                       </button>
-                    ))}
+                    )})}
                   </div>
                 </div>
               </div>
             </div>
+
+            {(history.length > 0 || result?.spec) && (
+              <div className="glass-card px-4 py-3 shrink-0 flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <Sparkles className="h-3.5 w-3.5 text-blue-500" />
+                  {lang === "zh" ? "模板与历史" : "Templates & History"}
+                </div>
+                <div className="min-w-0 flex-1 flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                  {history.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => loadHistoryItem(item)}
+                      className="shrink-0 max-w-[180px] truncate rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-500 hover:border-blue-200 hover:text-blue-600 transition"
+                      title={item.query}
+                    >
+                      <History className="mr-1 inline h-3 w-3" />
+                      {item.spec.concept}
+                    </button>
+                  ))}
+                </div>
+                {result?.spec && (
+                  <button
+                    type="button"
+                    onClick={shareCurrentAnimation}
+                    className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white hover:bg-blue-700 transition"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    {shareCopied ? (lang === "zh" ? "已复制" : "Copied") : (lang === "zh" ? "复制分享" : "Share")}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Video Area (Flexible) */}
             <div className="glass-card p-2 overflow-hidden flex-1 flex flex-col min-h-0">
@@ -233,11 +346,23 @@ export default function HomePage() {
                 <div className="flex-1 bg-[#1a1a1a] relative min-h-0 flex items-center justify-center p-6">
                   <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.3)_100%)] z-10" />
                   <div className="w-full h-full max-w-full max-h-full aspect-video shadow-2xl rounded-lg overflow-hidden border border-white/5">
-                    <DerivativeAnimation 
-                      key={animKey} 
-                      spec={result?.spec} 
-                      autoPlay={!!result} 
-                    />
+                    {loading ? (
+                      <GenerationSkeleton lang={lang} />
+                    ) : (
+                      <ErrorBoundary
+                        fallbackTitle={t.error.title}
+                        fallbackDescription={t.error.description}
+                        retryLabel={t.error.retry}
+                        onReset={() => setAnimKey((k) => k + 1)}
+                      >
+                        <DerivativeAnimation
+                          key={animKey}
+                          spec={result?.spec}
+                          autoPlay={!!result?.spec}
+                          controls={t.controls}
+                        />
+                      </ErrorBoundary>
+                    )}
                   </div>
                 </div>
 

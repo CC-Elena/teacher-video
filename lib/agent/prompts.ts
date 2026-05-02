@@ -1,59 +1,59 @@
 /**
- * Prompt templates for the AnimAgent pipeline
+ * AnimAgent 流水线的提示词模板
  *
- * Three-layer architecture:
- *   1. SYSTEM_PROMPT   – role + component docs + hard constraints
- *   2. FEW_SHOT_EXAMPLES – 3 high-quality input→spec pairs
- *   3. buildUserPrompt  – current task (+ error on retry)
+ * 三层架构：
+ *   1. SYSTEM_PROMPT   – 角色 + 组件文档 + 硬约束
+ *   2. FEW_SHOT_EXAMPLES – 3 个高质量的 输入→spec 对
+ *   3. buildUserPrompt  – 当前任务 (+ 重试时的错误信息)
  */
 
 import { ANIMATION_TOOLS } from "../components/animationTools";
 
 const TOOL_DOCS = ANIMATION_TOOLS.map(
   (t) =>
-    `### ${t.name}\n${t.description}\nParameters: ${JSON.stringify(t.parameters.properties, null, 2)}`
+    `### ${t.name}\n${t.description}\n参数: ${JSON.stringify(t.parameters.properties, null, 2)}`
 ).join("\n\n");
 
-export const SYSTEM_PROMPT = `You are AnimAgent, an expert math animation code generator.
-Your job is to produce a structured AnimationSpec JSON that describes a sequence of tool calls
-to render an educational math animation for SAT/AP students.
+export const SYSTEM_PROMPT = `你是一个 AnimAgent，专业的数学动画代码生成专家。
+你的工作是产生一个结构化的 AnimationSpec JSON，描述一系列工具调用，
+以此为 SAT/AP 学生渲染教学数学动画。
 
-## Available Animation Tools
+## 可用动画工具
 ${TOOL_DOCS}
 
-## Output Format
-You MUST respond with a valid JSON object matching this schema:
+## 输出格式
+你必须返回一个符合此 schema 的有效 JSON 对象：
 {
-  "concept": "brief concept name",
-  "animationType": "derivative|integral|function_graph|geometry|algebra_steps",
+  "concept": "简短的概念名称",
+  "animationType": "derivative|integral|limit|function_graph|geometry|algebra_steps",
   "steps": [
     {
-      "toolName": "<one of the available tool names>",
-      "params": { ...tool parameters... },
+      "toolName": "<可用工具名称之一>",
+      "params": { ...工具参数... },
       "startMs": 0,
       "durationMs": 2000,
-      "description": "what this step shows"
+      "description": "此步骤显示的内容"
     }
   ],
-  "narration": ["line 1", "line 2"],
+  "narration": ["第 1 行旁白", "第 2 行旁白"],
   "durationMs": 8000,
-  "expectedOutcome": "student will understand..."
+  "expectedOutcome": "学生将理解..."
 }
 
-## Hard Constraints
-- ONLY use tool names from the available list above
-- params must strictly match the tool's parameter schema
-- durationMs for each step must be positive and reasonable (500–5000ms)
-- Total durationMs should be 5000–15000ms
-- narration array must have at least 2 items
-- Do NOT include any explanation outside the JSON
-- If asked to fix an error, output ONLY the corrected JSON`;
+## 硬约束
+- 只能使用上方列表中的工具名称
+- params 必须严格符合工具的参数 schema
+- 每个步骤的 durationMs 必须为正且合理 (500–5000ms)
+- 总时长 durationMs 应在 5000–15000ms 之间
+- narration 数组必须至少包含 2 个条目
+- 不要在 JSON 之外包含任何解释
+- 如果被要求修复错误，仅输出修正后的 JSON`;
 
 export const FEW_SHOT_EXAMPLES = [
   {
-    user: "Show me how the derivative of x² equals 2x using a moving tangent line",
+    user: "向我展示如何通过移动切线使 x² 的导数等于 2x",
     spec: {
-      concept: "Derivative of x²",
+      concept: "x² 的导数",
       animationType: "derivative",
       steps: [
         {
@@ -70,7 +70,7 @@ export const FEW_SHOT_EXAMPLES = [
           },
           startMs: 0,
           durationMs: 2000,
-          description: "Draw the parabola y=x²",
+          description: "绘制抛物线 y=x²",
         },
         {
           toolName: "drawTangentLine",
@@ -86,33 +86,33 @@ export const FEW_SHOT_EXAMPLES = [
           },
           startMs: 2000,
           durationMs: 4000,
-          description: "Slide tangent from x=-3 to x=3 showing slope=2x",
+          description: "切线从 x=-3 滑动到 x=3，显示斜率=2x",
         },
         {
           toolName: "showStepByStep",
           params: {
-            steps: ["f(x) = x²", "f'(x) = 2x", "at x=2: slope = 4", "at x=-1: slope = -2"],
+            steps: ["f(x) = x²", "f'(x) = 2x", "当 x=2 时: 斜率 = 4", "当 x=-1 时: 斜率 = -2"],
             intervalMs: 1000,
             position: "right",
           },
           startMs: 6000,
           durationMs: 4000,
-          description: "Show algebraic derivation steps",
+          description: "显示代数推导步骤",
         },
       ],
       narration: [
-        "Let's explore the derivative of f(x) equals x squared.",
-        "As the tangent point moves, notice the slope equals 2x.",
-        "This is exactly the derivative — the instantaneous rate of change.",
+        "让我们探索 f(x) 等于 x 平方的导数。",
+        "随着切点的移动，请注意斜率等于 2x。",
+        "这正是导数 —— 瞬时变化率。",
       ],
       durationMs: 10000,
-      expectedOutcome: "Student understands derivative as slope of tangent line",
+      expectedOutcome: "学生理解导数即为切线的斜率",
     },
   },
   {
-    user: "Visualize the area under sin(x) from 0 to π",
+    user: "可视化从 0 到 π 的 sin(x) 下方的面积",
     spec: {
-      concept: "Definite Integral of sin(x)",
+      concept: "sin(x) 的定积分",
       animationType: "integral",
       steps: [
         {
@@ -129,7 +129,7 @@ export const FEW_SHOT_EXAMPLES = [
           },
           startMs: 0,
           durationMs: 1500,
-          description: "Draw sin(x) curve",
+          description: "绘制 sin(x) 曲线",
         },
         {
           toolName: "highlightIntegralArea",
@@ -144,30 +144,30 @@ export const FEW_SHOT_EXAMPLES = [
           },
           startMs: 1500,
           durationMs: 3500,
-          description: "Fill integral area with Riemann bars then smooth",
+          description: "先用黎曼矩形填充积分区域，然后平滑",
         },
         {
           toolName: "addMathLabel",
           params: { text: "∫₀^π sin(x)dx = 2", x: 1.5, y: 0.4, fontSize: 18, color: "#1F2937", fadeIn: true },
           startMs: 5000,
           durationMs: 1500,
-          description: "Show the result",
+          description: "显示结果",
         },
       ],
       narration: [
-        "The definite integral measures the area between a curve and the x-axis.",
-        "We can approximate it with rectangles — this is the Riemann sum.",
-        "As rectangles become infinitely thin, we get the exact area: 2.",
+        "定积分测量曲线与 x 轴之间的面积。",
+        "我们可以用矩形来近似它 —— 这就是黎曼和。",
+        "当矩形变得无限薄时，我们得到准确的面积：2。",
       ],
       durationMs: 7000,
-      expectedOutcome: "Student understands integral as area and Riemann approximation",
+      expectedOutcome: "学生理解积分为面积和黎曼近似",
     },
   },
 ];
 
 /**
- * Build the user-turn message for the LLM.
- * On retry, appends the previous error so LLM can self-fix.
+ * 构建发送给 LLM 的用户端消息。
+ * 在重试时，会附加之前的错误，以便 LLM 自行修复。
  */
 export function buildUserPrompt(
   userInput: string,
@@ -175,18 +175,18 @@ export function buildUserPrompt(
   previousSpec?: string
 ): string {
   if (previousError && previousSpec) {
-    return `Previous attempt failed with this error:
+    return `上一次尝试失败，错误信息如下：
 \`\`\`
 ${previousError}
 \`\`\`
 
-Original AnimationSpec that caused the error:
+导致错误的原始 AnimationSpec：
 \`\`\`json
 ${previousSpec}
 \`\`\`
 
-Please fix the JSON and return the corrected AnimationSpec.
-User's original request: "${userInput}"`;
+请修复 JSON 并返回修正后的 AnimationSpec。
+用户的原始请求： "${userInput}"`;
   }
-  return `Generate an AnimationSpec for: "${userInput}"`;
+  return `为以下内容生成 AnimationSpec： "${userInput}"`;
 }

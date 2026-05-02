@@ -1,46 +1,47 @@
 /**
- * Core types for the AnimAgent pipeline
+ * AnimAgent 流水线的核心类型
  */
 
 export type AnimationType =
   | "derivative"
   | "integral"
+  | "limit"
   | "function_graph"
   | "geometry"
   | "algebra_steps";
 
-/** Structured intent extracted from user's natural language input */
+/** 从用户自然语言输入中提取的结构化意图 */
 export interface AnimationSpec {
   concept: string;
   animationType: AnimationType;
-  /** Ordered list of tool calls to execute */
+  /** 要执行的工具调用排序列表 */
   steps: AnimationStep[];
-  /** Narration script lines synced with animation */
+  /** 与动画同步的旁白脚本行 */
   narration: string[];
-  /** Total duration in milliseconds */
+  /** 总时长 (毫秒) */
   durationMs: number;
-  /** Educational context for validation */
+  /** 用于验证的教学上下文 */
   expectedOutcome: string;
 }
 
 export interface AnimationStep {
   toolName: string;
   params: Record<string, unknown>;
-  /** When this step starts, relative to animation start (ms) */
+  /** 此步骤开始的时间，相对于动画开始 (ms) */
   startMs: number;
-  /** Duration of this step (ms) */
+  /** 此步骤的持续时间 (ms) */
   durationMs: number;
   description: string;
 }
 
-/** Raw LLM tool call from Function Calling API */
+/** 来自 Function Calling API 的原始 LLM 工具调用 */
 export interface LLMToolCall {
   id: string;
   name: string;
-  arguments: string; // JSON string
+  arguments: string; // JSON 字符串
 }
 
-/** Result of sandbox execution */
+/** 沙盒执行结果 */
 export interface ExecutionResult {
   success: boolean;
   error?: string;
@@ -49,7 +50,7 @@ export interface ExecutionResult {
   durationMs?: number;
 }
 
-/** Full pipeline state for one generation request */
+/** 单次生成请求的完整流水线状态 */
 export interface AgentState {
   requestId: string;
   userInput: string;
@@ -63,7 +64,7 @@ export interface AgentState {
   createdAt: Date;
 }
 
-/** Metrics for tracking generation quality */
+/** 用于追踪生成质量的指标 */
 export interface GenerationMetrics {
   pass1Success: boolean;
   totalAttempts: number;
