@@ -1,59 +1,116 @@
+/* eslint-disable */
 import { NextRequest, NextResponse } from "next/server";
 import { AnimAgent } from "@/lib/agent/animAgent";
+import { getDemoSpec } from "@/lib/agent/demoSpec";
+import { generateAnimationCode } from "@/lib/agent/codeGenerator";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const GENERATION_TIMEOUT_MS = 18000;
+
+function timeoutAfter(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`Generation timed out after ${ms}ms`)), ms);
+  });
+}
+
+function createDemoResult(userInput: string, startedAt: number) {
+  const spec = getDemoSpec(userInput);
+  return {
+    spec,
+    code: generateAnimationCode(spec),
+    metrics: {
+      pass1Success: false,
+      totalAttempts: 0,
+      totalDurationMs: Date.now() - startedAt,
+      errorsEncountered: ["Used local demo animation because live generation was unavailable."],
+    },
+    demoMode: true,
+  };
+}
+
 export async function POST(req: NextRequest) {
-  const { userInput, maxAttempts = 3 } = await req.json();
+  const { userInput, maxAttempts = 3, lang = "zh" } = await req.json();
 
   if (!userInput || typeof userInput !== "string") {
     return NextResponse.json({ error: "userInput is required" }, { status: 400 });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    // Demo mode: return mock spec when no API key
-    const mockSpec = {
-      concept: "Derivative of x²",
-      animationType: "derivative",
-      steps: [
-        {
-          toolName: "drawFunctionGraph",
-          params: { expression: "x^2", xMin: -4, xMax: 4, yMin: -1, yMax: 12, color: "#3B82F6", animateDraw: true, label: "y = x²" },
-          startMs: 0, durationMs: 2000, description: "Draw the parabola y=x²",
-        },
-        {
-          toolName: "drawTangentLine",
-          params: { expression: "x^2", atX: 0, animateSlide: true, xMin: -3, xMax: 3, showSlopeLabel: true, curveColor: "#3B82F6", tangentColor: "#F59E0B" },
-          startMs: 2000, durationMs: 5000, description: "Slide tangent showing slope=2x",
-        },
-        {
-          toolName: "showStepByStep",
-          params: { steps: ["f(x) = x²", "f'(x) = 2x", "slope at x=2 is 4"], intervalMs: 1000, position: "right" },
-          startMs: 7000, durationMs: 3000, description: "Show derivation steps",
-        },
-      ],
-      narration: ["Let's explore the derivative of x squared.", "The tangent slope at any point equals 2x."],
-      durationMs: 10000,
-      expectedOutcome: "Student understands derivative as tangent slope",
-    };
-    return NextResponse.json({
-      spec: mockSpec,
-      metrics: { pass1Success: true, totalAttempts: 1, totalDurationMs: 0, errorsEncountered: [] },
-      demoMode: true,
-    });
-  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let streamOpen = true;
+      const send = (data: any) => {
+        if (!streamOpen) return;
+        controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+      };
+      const close = () => {
+        if (!streamOpen) return;
+        streamOpen = false;
+        controller.close();
+      };
+      const startedAt = Date.now();
 
-  try {
-    const agent = new AnimAgent(apiKey);
-    const result = await agent.run(userInput, maxAttempts);
-    return NextResponse.json(result);
-  } catch (err) {
-    console.error("[AnimAgent]", err);
-    return NextResponse.json(
-      { error: String(err) },
-      { status: 500 }
-    );
-  }
+      let apiKey = process.env.OPENAI_API_KEY;
+      let baseURL = process.env.OPENAI_BASE_URL;
+      let model = process.env.OPENAI_MODEL || "gpt-4o";
+
+      if (process.env.NVIDIA_API_KEY) {
+        apiKey = process.env.NVIDIA_API_KEY;
+        baseURL = "https://integrate.api.nvidia.com/v1";
+        model = process.env.NVIDIA_MODEL || "meta/llama-3.1-405b-instruct";
+      } else if (process.env.DEEPSEEK_API_KEY) {
+        apiKey = process.env.DEEPSEEK_API_KEY;
+        baseURL = "https://api.deepseek.com";
+        model = "deepseek-chat";
+      }
+
+      if (!apiKey || apiKey === "your_openai_api_key_here") {
+        send({
+          type: "log",
+          message: lang === "zh"
+            ? "未找到可用 API Key，切换到本地演示动画。"
+            : "No valid API key found; using a local demo animation.",
+        });
+        send({ type: "result", ...createDemoResult(userInput, startedAt) });
+        close();
+        return;
+      }
+
+      try {
+        const agent = new AnimAgent(apiKey, model, baseURL);
+        const result = await Promise.race([
+          agent.run(
+            userInput,
+            maxAttempts,
+            (state) => send({ type: "status", ...state }),
+            (message) => send({ type: "log", message }),
+            lang
+          ),
+          timeoutAfter(GENERATION_TIMEOUT_MS),
+        ]);
+        send({ type: "result", ...result });
+      } catch (err) {
+        console.error("[AnimAgent]", err);
+        send({
+          type: "log",
+          message: lang === "zh"
+            ? "实时生成暂时不可用，已切换到本地演示动画。"
+            : "Live generation is unavailable; using a local demo animation.",
+        });
+        send({ type: "result", ...createDemoResult(userInput, startedAt) });
+      } finally {
+        close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }

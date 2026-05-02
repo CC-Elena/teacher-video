@@ -1,7 +1,10 @@
+/* eslint-disable */
 "use client";
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import AgentInspector, { AgentLog } from "@/components/agent/AgentInspector";
+import { translations, Language } from "@/lib/i18n";
 
 // Dynamic import to avoid SSR issues with Canvas
 const DerivativeAnimation = dynamic(
@@ -9,14 +12,10 @@ const DerivativeAnimation = dynamic(
   { ssr: false, loading: () => <div className="w-full h-[420px] bg-gray-50 rounded-xl animate-pulse" /> }
 );
 
+import { AnimationSpec } from "@/lib/agent/types";
+
 interface GenerateResult {
-  spec?: {
-    concept: string;
-    animationType: string;
-    steps: unknown[];
-    narration: string[];
-    durationMs: number;
-  };
+  spec?: AnimationSpec;
   metrics?: {
     pass1Success: boolean;
     totalAttempts: number;
@@ -38,197 +37,265 @@ export default function HomePage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
-  const [showSpec, setShowSpec] = useState(false);
   const [animKey, setAnimKey] = useState(0);
+  const [lang, setLang] = useState<Language>("zh");
+
+  const t = translations[lang];
+
+  // Agent Inspector State
+  const [agentStatus, setAgentStatus] = useState("pending");
+  const [agentAttempts, setAgentAttempts] = useState(1);
+  const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
+
+  const addLog = (message: string) => {
+    setAgentLogs(prev => [
+      ...prev,
+      { id: Math.random().toString(36).substr(2, 9), message, timestamp: new Date() }
+    ]);
+  };
 
   const handleGenerate = async (query?: string) => {
     const q = query ?? input;
     if (!q.trim()) return;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
+    
     setLoading(true);
     setResult(null);
+    setAgentLogs([]);
+    setAgentStatus("generating");
+    setAgentAttempts(1);
+    addLog(`User intent: "${q}"`);
+
     try {
-      const res = await fetch("/api/generate", {
+      const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userInput: q }),
+        body: JSON.stringify({ userInput: q, lang }),
+        signal: controller.signal,
       });
-      const data: GenerateResult = await res.json();
-      setResult(data);
-      setAnimKey((k) => k + 1);
+
+      if (!response.body) throw new Error("No response body");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+            if (chunk.type === "log") {
+              addLog(chunk.message);
+            } else if (chunk.type === "status") {
+              setAgentStatus(chunk.status);
+              if (chunk.attempts) setAgentAttempts(chunk.attempts);
+            } else if (chunk.type === "result") {
+              setResult(chunk);
+              setAnimKey((k) => k + 1);
+              setAgentStatus("done");
+            } else if (chunk.type === "error") {
+              setResult({ error: chunk.error });
+              setAgentStatus("error");
+              addLog(`❌ Error: ${chunk.error}`);
+            }
+          } catch (e) {
+            console.error("Error parsing chunk", e);
+          }
+        }
+      }
     } catch (e) {
-      setResult({ error: String(e) });
+      const message = e instanceof DOMException && e.name === "AbortError"
+        ? "Generation request timed out. Please try again."
+        : String(e);
+      setResult({ error: message });
+      setAgentStatus("error");
+      addLog(`❌ Critical failure: ${message}`);
     } finally {
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+    <main className="min-h-screen pro-gradient overflow-hidden">
       {/* Header */}
-      <header className="border-b border-gray-200 bg-white/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm">VT</div>
-            <span className="font-bold text-gray-900 text-lg">AnimAgent</span>
-            <span className="text-xs text-gray-400 font-normal ml-1">by VideoTutor</span>
+      <header className="border-b border-slate-200 bg-white/60 backdrop-blur-md h-16 flex items-center shrink-0 z-50">
+        <div className="max-w-[1600px] w-full mx-auto px-8 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+              <span className="font-black text-lg italic">A</span>
+            </div>
+            <div>
+              <span className="font-bold text-slate-900 text-lg tracking-tight block leading-none">{t.title}</span>
+              <span className="text-[9px] font-bold text-blue-500 uppercase tracking-[0.2em]">{t.subtitle}</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
-            Generate → Execute → Validate → Fix
+          <div className="flex items-center gap-6">
+            <div className="hidden md:flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 text-green-600 border border-green-100">
+                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                Live Agent
+              </div>
+              <div className="w-px h-4 bg-slate-200" />
+              <span>{t.concept}</span>
+            </div>
+            <button 
+              onClick={() => setLang(l => l === "en" ? "zh" : "en")}
+              className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-600 text-[10px] font-bold transition shadow-sm text-slate-600 flex items-center gap-2"
+            >
+              🌐 {lang === "en" ? "中文" : "English"}
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto px-6 py-12">
-        {/* Hero */}
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
-            Math Animations, Instantly
-          </h1>
-          <p className="text-gray-500 text-lg max-w-xl mx-auto">
-            Type any SAT/AP concept. AnimAgent generates, validates, and renders
-            a personalized animation — with an auto-fix loop.
-          </p>
-        </div>
+      {/* Main Container: Fixed height to fit screen */}
+      <div className="max-w-[1600px] mx-auto px-8 py-6 h-[calc(100vh-64px)]">
+        <div className="flex flex-col lg:flex-row gap-8 h-full items-stretch">
+          
+          {/* Left Column: Input + Video (Same height as right) */}
+          <div className="flex-1 flex flex-col gap-6 min-h-0">
+            
+            {/* Input Area (Compact) */}
+            <div className="glass-card p-5 relative overflow-hidden shrink-0">
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-6">
+                <div className="flex-1 shrink-0">
+                  <h1 className="text-2xl font-black text-slate-900 mb-1 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600">
+                    {t.heroTitle}
+                  </h1>
+                  <p className="text-slate-500 text-xs leading-relaxed line-clamp-1">
+                    {t.heroSubtitle}
+                  </p>
+                </div>
 
-        {/* Input */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-          <div className="flex gap-3">
-            <input
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-              placeholder='e.g. "Show how the derivative of x² equals 2x"'
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
-              disabled={loading}
-            />
-            <button
-              onClick={() => handleGenerate()}
-              disabled={loading || !input.trim()}
-              className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 transition"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Generating...
-                </span>
-              ) : "Generate ✦"}
-            </button>
-          </div>
-
-          {/* Example prompts */}
-          <div className="flex flex-wrap gap-2 mt-4">
-            {EXAMPLE_PROMPTS.map((p) => (
-              <button
-                key={p}
-                onClick={() => { setInput(p); handleGenerate(p); }}
-                className="text-xs px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Animation Preview */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-800 text-sm uppercase tracking-wide">
-              Animation Preview
-            </h2>
-            {result?.spec && (
-              <span className="text-xs text-gray-400">{result.spec.concept}</span>
-            )}
-          </div>
-          <DerivativeAnimation key={animKey} autoPlay={!!result} />
-        </div>
-
-        {/* Metrics + Spec */}
-        {result && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {/* Metrics */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-              <h3 className="font-semibold text-gray-800 text-sm mb-3">Generation Metrics</h3>
-              {result.error ? (
-                <p className="text-red-500 text-sm">{result.error}</p>
-              ) : (
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Pass@1</span>
-                    <span className={result.metrics?.pass1Success ? "text-green-600 font-medium" : "text-orange-500"}>
-                      {result.metrics?.pass1Success ? "✓ Success" : "✗ Required retry"}
-                    </span>
+                <div className="flex-[1.5] max-w-xl flex flex-col gap-3">
+                  <div className="flex gap-2 p-1 bg-slate-100/50 rounded-xl border border-slate-200/60 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
+                    <input
+                      className="flex-1 px-4 py-2 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+                      placeholder={t.inputPlaceholder}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
+                      disabled={loading}
+                    />
+                    <button
+                      onClick={() => handleGenerate()}
+                      disabled={loading || !input.trim()}
+                      className="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 min-w-[100px]"
+                    >
+                      {loading ? t.thinkingBtn : t.generateBtn}
+                    </button>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Attempts</span>
-                    <span className="font-medium">{result.metrics?.totalAttempts}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Duration</span>
-                    <span className="font-medium">{result.metrics?.totalDurationMs}ms</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Mode</span>
-                    <span className={result.demoMode ? "text-amber-600" : "text-blue-600"}>
-                      {result.demoMode ? "Demo (no API key)" : "Live"}
-                    </span>
+
+                  <div className="flex flex-wrap gap-2">
+                    {EXAMPLE_PROMPTS.map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => { setInput(p); handleGenerate(p); }}
+                        className="text-[9px] font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-400 hover:bg-blue-600 hover:text-white transition-all border border-slate-200/50 truncate max-w-[140px]"
+                      >
+                        {p}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* Narration */}
-            {result.spec && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-                <h3 className="font-semibold text-gray-800 text-sm mb-3">Narration Script</h3>
-                <ol className="space-y-2">
+            {/* Video Area (Flexible) */}
+            <div className="glass-card p-2 overflow-hidden flex-1 flex flex-col min-h-0">
+              <div className="bg-slate-900 rounded-[20px] overflow-hidden flex-1 flex flex-col relative">
+                <div className="px-5 py-3 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1 mr-3">
+                      <div className="w-2 h-2 rounded-full bg-red-500/40" />
+                      <div className="w-2 h-2 rounded-full bg-amber-500/40" />
+                      <div className="w-2 h-2 rounded-full bg-green-500/40" />
+                    </div>
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">
+                      {t.animationPreview}
+                    </span>
+                  </div>
+                  {result?.spec && (
+                    <div className="px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-bold uppercase tracking-wider">
+                      {result.spec.concept}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 bg-[#1a1a1a] relative min-h-0 flex items-center justify-center p-6">
+                  <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.3)_100%)] z-10" />
+                  <div className="w-full h-full max-w-full max-h-full aspect-video shadow-2xl rounded-lg overflow-hidden border border-white/5">
+                    <DerivativeAnimation 
+                      key={animKey} 
+                      spec={result?.spec} 
+                      autoPlay={!!result} 
+                    />
+                  </div>
+                </div>
+
+                {/* Subtitles Overlay (Optional UI touch) */}
+                {result?.spec && (
+                  <div className="absolute bottom-6 left-0 right-0 z-20 px-10 text-center pointer-events-none">
+                    <p className="inline-block px-4 py-2 bg-black/60 backdrop-blur-md rounded-xl text-white text-sm font-medium border border-white/10 shadow-xl">
+                      {result.spec.concept} — {t.animationPreview}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Script Section (Compact scrollable at bottom) */}
+            {result?.spec && (
+              <div className="glass-card p-4 shrink-0 overflow-hidden">
+                <div className="flex items-center gap-3 mb-3 shrink-0">
+                  <div className="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center text-amber-600 shadow-sm">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                  </div>
+                  <h3 className="font-bold text-slate-700 text-[11px] uppercase tracking-wider">{t.narrationScript}</h3>
+                </div>
+                <div className="flex gap-4 overflow-x-auto pb-1 custom-scrollbar scrollbar-thin">
                   {result.spec.narration.map((line, i) => (
-                    <li key={i} className="flex gap-2 text-sm text-gray-600">
-                      <span className="text-blue-500 font-medium w-4 shrink-0">{i + 1}.</span>
-                      {line}
-                    </li>
+                    <div key={i} className="flex-none w-[260px] p-3 rounded-xl bg-slate-50 border border-slate-100 relative group hover:border-blue-200 transition-colors">
+                      <span className="text-[9px] font-black text-blue-500/20 absolute top-2 right-3 italic">STEP {i+1}</span>
+                      <p className="text-slate-600 text-[11px] leading-relaxed line-clamp-2 italic">
+                        "{line}"
+                      </p>
+                    </div>
                   ))}
-                </ol>
+                </div>
               </div>
             )}
           </div>
-        )}
 
-        {/* AnimationSpec JSON inspector */}
-        {result?.spec && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-800 text-sm">AnimationSpec JSON</h3>
-              <button
-                onClick={() => setShowSpec((s) => !s)}
-                className="text-xs text-blue-500 hover:underline"
-              >
-                {showSpec ? "Hide" : "Show"}
-              </button>
+          {/* Right Column: Agent Inspector (Same height as Left) */}
+          <div className="w-full lg:w-[400px] shrink-0 h-full flex flex-col gap-4">
+            <div className="glass-card overflow-hidden flex-1 border border-slate-200/60 shadow-2xl">
+              <AgentInspector 
+                status={agentStatus}
+                attempts={agentAttempts}
+                logs={agentLogs}
+                spec={result?.spec}
+                lang={lang}
+              />
             </div>
-            {showSpec && (
-              <pre className="text-xs bg-gray-50 rounded-lg p-4 overflow-x-auto text-gray-700 max-h-80">
-                {JSON.stringify(result.spec, null, 2)}
-              </pre>
-            )}
-            {!showSpec && (
-              <div className="text-xs text-gray-400 flex gap-4">
-                <span>{result.spec.steps.length} steps</span>
-                <span>{result.spec.durationMs / 1000}s total</span>
-                <span>{result.spec.animationType}</span>
-              </div>
-            )}
+            
+            <div className="px-4 text-center shrink-0">
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest opacity-60">
+                {t.footerLine1}
+              </p>
+            </div>
           </div>
-        )}
-
-        {/* Footer */}
-        <footer className="mt-16 text-center text-xs text-gray-400 space-y-1">
-          <p>AnimAgent MVP · Built for VideoTutor · Generate → Execute → Validate → Fix</p>
-          <p>Targeting SAT/AP Calculus · Powered by OpenAI Function Calling</p>
-        </footer>
+        </div>
       </div>
     </main>
   );

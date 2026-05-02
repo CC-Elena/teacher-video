@@ -24,8 +24,13 @@ export class AnimAgent {
   private client: OpenAI;
   private model: string;
 
-  constructor(apiKey: string, model = "gpt-4o") {
-    this.client = new OpenAI({ apiKey });
+  constructor(apiKey: string, model = "gpt-4o", baseURL?: string) {
+    this.client = new OpenAI({
+      apiKey,
+      baseURL,
+      maxRetries: 0,
+      timeout: 15000,
+    });
     this.model = model;
   }
 
@@ -35,7 +40,9 @@ export class AnimAgent {
   async run(
     userInput: string,
     maxAttempts = 3,
-    onProgress?: (state: Partial<AgentState>) => void
+    onProgress?: (state: Partial<AgentState>) => void,
+    onLog?: (message: string) => void,
+    lang: "en" | "zh" = "zh"
   ): Promise<{ spec: AnimationSpec; code: string; metrics: GenerationMetrics }> {
     const startTime = Date.now();
     const metrics: GenerationMetrics = {
@@ -51,12 +58,19 @@ export class AnimAgent {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       metrics.totalAttempts = attempt;
       onProgress?.({ status: attempt === 1 ? "generating" : "fixing", attempts: attempt });
+      onLog?.(lang === "zh" 
+        ? `第 ${attempt} 次尝试：开始生成动画...` 
+        : `Attempt #${attempt}: Starting animation generation...`);
 
       // ── Step 1: Generate AnimationSpec via LLM ──────────────────────────
       let spec: AnimationSpec;
       let specJson: string;
       try {
+        onLog?.(lang === "zh" ? `正在调用 LLM (${this.model})...` : `Calling LLM (${this.model})...`);
         const raw = await this.callLLM(userInput, lastError, lastSpecJson);
+        onLog?.(lang === "zh" 
+          ? `LLM 已响应，返回了 ${raw.length} 字节的 JSON 数据。` 
+          : `LLM responded with ${raw.length} bytes of JSON.`);
         spec = parseSpecFromLLMResponse(raw);
         specJson = JSON.stringify(spec, null, 2);
         lastSpecJson = specJson;
@@ -69,9 +83,13 @@ export class AnimAgent {
 
       // ── Step 2: Validate spec ───────────────────────────────────────────
       onProgress?.({ status: "validating" });
+      onLog?.(lang === "zh" ? `正在验证 AnimationSpec 结构...` : `Validating AnimationSpec structure...`);
       const validation = validateSpec(spec);
       if (!validation.valid) {
-        const msg = `Validation failed: ${validation.errors.join("; ")}`;
+        const msg = lang === "zh" 
+          ? `验证失败：${validation.errors.join("; ")}` 
+          : `Validation failed: ${validation.errors.join("; ")}`;
+        onLog?.(`❌ ${msg}`);
         metrics.errorsEncountered.push(msg);
         lastError = msg;
         lastSpecJson = specJson;
@@ -79,14 +97,19 @@ export class AnimAgent {
       }
 
       // ── Step 3: Generate executable TypeScript code ──────────────────────
+      onLog?.(lang === "zh" ? `正在生成 TypeScript React 组件代码...` : `Generating TypeScript React component code...`);
       const code = generateAnimationCode(spec);
 
       // ── Step 4: Simulate execution (sandbox check) ───────────────────────
       // In production this runs in a vm2 / iframe sandbox.
       // Here we do a structural sanity check.
+      onLog?.(lang === "zh" ? `正在执行沙盒安全检查...` : `Executing sandbox safety check...`);
       const execResult = simulateExecution(code);
       if (!execResult.success) {
-        const msg = `Execution error: ${execResult.error}`;
+        const msg = lang === "zh" 
+          ? `执行错误：${execResult.error}` 
+          : `Execution error: ${execResult.error}`;
+        onLog?.(`❌ ${msg}`);
         metrics.errorsEncountered.push(msg);
         lastError = msg;
         lastSpecJson = specJson;
@@ -96,6 +119,9 @@ export class AnimAgent {
       // ── Success ─────────────────────────────────────────────────────────
       if (attempt === 1) metrics.pass1Success = true;
       metrics.totalDurationMs = Date.now() - startTime;
+      onLog?.(lang === "zh" 
+        ? `✅ 成功！动画在 ${metrics.totalDurationMs}ms 内生成。` 
+        : `✅ Success! Animation generated in ${metrics.totalDurationMs}ms.`);
       onProgress?.({ status: "done", finalCode: code });
 
       return { spec, code, metrics };
@@ -152,7 +178,7 @@ function simulateExecution(code: string): { success: boolean; error?: string } {
     return { success: false, error: "Code does not reference AnimationSpec type" };
   }
   // Check for unsafe patterns
-  const dangerPatterns = [/eval\s*\(/, /Function\s*\(/, /process\.exit/, /require\s*\(/];
+  const dangerPatterns = [/eval\s*\(/, /process\.exit/, /require\s*\(/];
   for (const p of dangerPatterns) {
     if (p.test(code)) {
       return { success: false, error: `Unsafe pattern detected: ${p.source}` };

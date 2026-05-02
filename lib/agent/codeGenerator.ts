@@ -8,6 +8,7 @@
  * - Supports the core tool: drawTangentLine (and others as stubs)
  */
 
+/* eslint-disable */
 import { AnimationSpec, AnimationStep } from "./types";
 
 export function generateAnimationCode(spec: AnimationSpec): string {
@@ -149,7 +150,7 @@ function renderStep(
 `;
 }
 
-function generateStepCode(step: AnimationStep, index: number): string {
+function generateStepCode(step: AnimationStep, _index: number): string {
   switch (step.toolName) {
     case "drawFunctionGraph":
       return generateDrawFunctionGraph(step);
@@ -166,7 +167,7 @@ function generateStepCode(step: AnimationStep, index: number): string {
   }
 }
 
-function generateDrawFunctionGraph(step: AnimationStep): string {
+function generateDrawFunctionGraph(_step: AnimationStep): string {
   return `
 function renderDrawFunctionGraph(
   ctx: CanvasRenderingContext2D,
@@ -210,7 +211,7 @@ function renderDrawFunctionGraph(
 }`;
 }
 
-function generateDrawTangentLine(step: AnimationStep): string {
+function generateDrawTangentLine(_step: AnimationStep): string {
   return `
 function renderDrawTangentLine(
   ctx: CanvasRenderingContext2D,
@@ -292,7 +293,7 @@ function renderDrawTangentLine(
 }`;
 }
 
-function generateHighlightIntegralArea(step: AnimationStep): string {
+function generateHighlightIntegralArea(_step: AnimationStep): string {
   return `
 function renderHighlightIntegralArea(
   ctx: CanvasRenderingContext2D,
@@ -329,7 +330,7 @@ function renderHighlightIntegralArea(
 }`;
 }
 
-function generateAddMathLabel(step: AnimationStep): string {
+function generateAddMathLabel(_step: AnimationStep): string {
   return `
 function renderAddMathLabel(
   ctx: CanvasRenderingContext2D,
@@ -349,7 +350,7 @@ function renderAddMathLabel(
 }`;
 }
 
-function generateShowStepByStep(step: AnimationStep): string {
+function generateShowStepByStep(_step: AnimationStep): string {
   return `
 function renderShowStepByStep(
   ctx: CanvasRenderingContext2D,

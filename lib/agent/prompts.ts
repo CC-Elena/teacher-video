@@ -14,7 +14,7 @@ const TOOL_DOCS = ANIMATION_TOOLS.map(
     `### ${t.name}\n${t.description}\nParameters: ${JSON.stringify(t.parameters.properties, null, 2)}`
 ).join("\n\n");
 
-export const SYSTEM_PROMPT = `You are AnimAgent, an expert math animation code generator for VideoTutor.
+export const SYSTEM_PROMPT = `You are AnimAgent, an expert math animation code generator.
 Your job is to produce a structured AnimationSpec JSON that describes a sequence of tool calls
 to render an educational math animation for SAT/AP students.
 

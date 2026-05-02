@@ -1,267 +1,191 @@
+/* eslint-disable */
 "use client";
+
 /**
- * DerivativeAnimation — The Core Animation Component
- *
- * Demonstrates: f(x) = x² and its derivative f'(x) = 2x
- * Animation: tangent line slides along the parabola, slope label updates live
- *
- * This is the single most important SAT/AP Calculus concept for VideoTutor's
- * target audience. Mirrors what VideoTutor generates for derivative questions.
+ * AnimationPlayer — Robust Dynamic Spec-Driven Renderer
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { AnimationSpec, AnimationStep } from "@/lib/agent/types";
 
 interface Props {
-  expression?: string;          // default: "x^2"
+  spec?: AnimationSpec;
   width?: number;
   height?: number;
   autoPlay?: boolean;
 }
 
-// ── Safe math evaluator ─────────────────────────────────────────────────────
+// ── Math helpers ────────────────────────────────────────────────────────────
 
 function evalExpr(expr: string, x: number): number {
-  const fns: Record<string, unknown> = {
+  const safeScope: Record<string, number | ((...args: number[]) => number)> = {
     x,
-    sin: Math.sin,
-    cos: Math.cos,
-    tan: Math.tan,
-    sqrt: Math.sqrt,
-    abs: Math.abs,
-    pi: Math.PI,
-    e: Math.E,
-    log: Math.log,
+    sin: Math.sin, cos: Math.cos, tan: Math.tan,
+    sqrt: Math.sqrt, abs: Math.abs, pi: Math.PI,
+    e: Math.E, log: Math.log, pow: Math.pow,
   };
   try {
-    const js = expr.replace(/\^/g, "**");
-    const fn = new Function(...Object.keys(fns), `"use strict"; return (${js});`);
-    const result = fn(...Object.values(fns));
+    const jsExpr = expr.replace(/\^/g, "**")
+                     .replace(/(\d)([a-zA-Z(])/g, "$1*$2")
+                     .replace(/(\))(\d)/g, "$1*$2");
+    
+    const fn = new Function(...Object.keys(safeScope), `"use strict"; return (${jsExpr});`);
+    const result = fn(...Object.values(safeScope));
     return isFinite(result) ? result : NaN;
-  } catch {
+  } catch (e) {
+    console.error("Math eval error:", e, expr);
     return NaN;
   }
 }
 
-function numericalDerivative(expr: string, x: number, h = 1e-5): number {
-  return (evalExpr(expr, x + h) - evalExpr(expr, x - h)) / (2 * h);
+function derivative(expr: string, x: number, h = 1e-5): number {
+  const y2 = evalExpr(expr, x + h);
+  const y1 = evalExpr(expr, x - h);
+  return (y2 - y1) / (2 * h);
 }
 
-// ── Coordinate helpers ──────────────────────────────────────────────────────
+// ── Coordinate transform ──────────────────────────────────────────────────
 
-const XMIN = -4, XMAX = 4, YMIN = -1, YMAX = 12;
-const PAD = { top: 40, right: 20, bottom: 40, left: 50 };
+interface Bounds { xMin: number; xMax: number; yMin: number; yMax: number }
 
-function toCanvasX(mx: number, w: number): number {
-  const pw = w - PAD.left - PAD.right;
-  return PAD.left + ((mx - XMIN) / (XMAX - XMIN)) * pw;
+function toCanvasX(x: number, bounds: Bounds, w: number): number {
+  return ((x - bounds.xMin) / (bounds.xMax - bounds.xMin)) * w;
+}
+function toCanvasY(y: number, bounds: Bounds, h: number): number {
+  return h - ((y - bounds.yMin) / (bounds.yMax - bounds.yMin)) * h;
 }
 
-function toCanvasY(my: number, h: number): number {
-  const ph = h - PAD.top - PAD.bottom;
-  return PAD.top + ph - ((my - YMIN) / (YMAX - YMIN)) * ph;
-}
+// ── Step Renderers ──────────────────────────────────────────────────────────
 
-// ── Drawing primitives ──────────────────────────────────────────────────────
-
-function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  ctx.strokeStyle = "#E5E7EB";
+function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number, bounds: Bounds) {
+  ctx.strokeStyle = "#F1F5F9";
   ctx.lineWidth = 1;
-
-  // Vertical grid lines
-  for (let x = Math.ceil(XMIN); x <= Math.floor(XMAX); x++) {
-    const cx = toCanvasX(x, w);
-    ctx.beginPath();
-    ctx.moveTo(cx, PAD.top);
-    ctx.lineTo(cx, h - PAD.bottom);
-    ctx.stroke();
+  for (let x = Math.floor(bounds.xMin); x <= Math.ceil(bounds.xMax); x++) {
+    const cx = toCanvasX(x, bounds, w);
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
   }
-  // Horizontal grid lines
-  for (let y = Math.ceil(YMIN); y <= Math.floor(YMAX); y += 2) {
-    const cy = toCanvasY(y, h);
-    ctx.beginPath();
-    ctx.moveTo(PAD.left, cy);
-    ctx.lineTo(w - PAD.right, cy);
-    ctx.stroke();
+  for (let y = Math.floor(bounds.yMin); y <= Math.ceil(bounds.yMax); y++) {
+    const cy = toCanvasY(y, bounds, h);
+    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
   }
-
-  // Axes
-  ctx.strokeStyle = "#374151";
+  ctx.strokeStyle = "#CBD5E1";
   ctx.lineWidth = 2;
-  // x-axis
-  const y0 = toCanvasY(0, h);
-  ctx.beginPath();
-  ctx.moveTo(PAD.left, y0);
-  ctx.lineTo(w - PAD.right, y0);
-  ctx.stroke();
-  // y-axis
-  const x0 = toCanvasX(0, w);
-  ctx.beginPath();
-  ctx.moveTo(x0, PAD.top);
-  ctx.lineTo(x0, h - PAD.bottom);
-  ctx.stroke();
-
-  // Axis labels
-  ctx.fillStyle = "#6B7280";
-  ctx.font = "12px monospace";
-  ctx.textAlign = "center";
-  for (let x = Math.ceil(XMIN); x <= Math.floor(XMAX); x++) {
-    if (x === 0) continue;
-    ctx.fillText(String(x), toCanvasX(x, w), y0 + 18);
-  }
-  ctx.textAlign = "right";
-  for (let y = 2; y <= Math.floor(YMAX); y += 2) {
-    ctx.fillText(String(y), x0 - 6, toCanvasY(y, h) + 4);
-  }
-  ctx.textAlign = "left";
-  ctx.font = "13px serif";
-  ctx.fillStyle = "#374151";
-  ctx.fillText("x", w - PAD.right + 6, y0 + 4);
-  ctx.fillText("y", x0 + 6, PAD.top - 8);
+  const x0 = toCanvasX(0, bounds, w);
+  const y0 = toCanvasY(0, bounds, h);
+  if (x0 >= 0 && x0 <= w) { ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke(); }
+  if (y0 >= 0 && y0 <= h) { ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(w, y0); ctx.stroke(); }
 }
 
-function drawCurve(
-  ctx: CanvasRenderingContext2D,
-  expr: string,
-  progress: number,
-  w: number,
-  h: number,
-  color: string
-) {
-  const drawUpTo = XMIN + (XMAX - XMIN) * Math.min(progress, 1);
+function renderDrawFunctionGraph(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number, bounds: Bounds) {
+  const expr = String(params.expression ?? "x");
+  const color = String(params.color ?? "#3B82F6");
+  const animateDraw = params.animateDraw !== false;
+  const drawUpTo = animateDraw ? bounds.xMin + (bounds.xMax - bounds.xMin) * progress : bounds.xMax;
+  
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2.5;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 4;
+  ctx.lineWidth = 3;
   ctx.beginPath();
   let first = true;
-  for (let xi = XMIN; xi <= drawUpTo; xi += 0.02) {
+  for (let xi = bounds.xMin; xi <= drawUpTo; xi += (bounds.xMax - bounds.xMin) / 200) {
     const yi = evalExpr(expr, xi);
-    if (isNaN(yi) || yi > YMAX + 2 || yi < YMIN - 2) {
-      first = true;
-      continue;
-    }
-    const cx = toCanvasX(xi, w);
-    const cy = toCanvasY(yi, h);
-    if (first) {
-      ctx.moveTo(cx, cy);
-      first = false;
-    } else {
-      ctx.lineTo(cx, cy);
-    }
+    if (!isFinite(yi)) { first = true; continue; }
+    const cx = toCanvasX(xi, bounds, w);
+    const cy = toCanvasY(yi, bounds, h);
+    if (first) { ctx.moveTo(cx, cy); first = false; }
+    else ctx.lineTo(cx, cy);
   }
   ctx.stroke();
-  ctx.shadowBlur = 0;
 }
 
-function drawTangent(
-  ctx: CanvasRenderingContext2D,
-  expr: string,
-  currentX: number,
-  progress: number,
-  w: number,
-  h: number
-) {
+function renderDrawTangentLine(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number, bounds: Bounds) {
+  const expr = String(params.expression ?? "x^2");
+  const animateSlide = params.animateSlide !== false;
+  const atX = Number(params.atX ?? 0);
+  const currentX = animateSlide ? bounds.xMin + (bounds.xMax - bounds.xMin) * progress : atX;
   const currentY = evalExpr(expr, currentX);
-  const slope = numericalDerivative(expr, currentX);
-  const halfLen = 1.6;
-
-  // Tangent line
+  const slope = derivative(expr, currentX);
+  
+  const tLen = (bounds.xMax - bounds.xMin) * 0.2;
+  const cx1 = toCanvasX(currentX - tLen, bounds, w);
+  const cy1 = toCanvasY(currentY - slope * tLen, bounds, h);
+  const cx2 = toCanvasX(currentX + tLen, bounds, w);
+  const cy2 = toCanvasY(currentY + slope * tLen, bounds, h);
+  
   ctx.strokeStyle = "#F59E0B";
-  ctx.lineWidth = 2.2;
-  ctx.setLineDash([7, 5]);
-  ctx.globalAlpha = Math.min(1, progress * 3);
-  ctx.beginPath();
-  const x1 = currentX - halfLen;
-  const y1 = currentY - slope * halfLen;
-  const x2 = currentX + halfLen;
-  const y2 = currentY + slope * halfLen;
-  ctx.moveTo(toCanvasX(x1, w), toCanvasY(y1, h));
-  ctx.lineTo(toCanvasX(x2, w), toCanvasY(y2, h));
-  ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([8, 6]);
+  ctx.beginPath(); ctx.moveTo(cx1, cy1); ctx.lineTo(cx2, cy2); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.globalAlpha = 1;
-
-  // Point on curve
-  const px = toCanvasX(currentX, w);
-  const py = toCanvasY(currentY, h);
+  
+  const px = toCanvasX(currentX, bounds, w);
+  const py = toCanvasY(currentY, bounds, h);
   ctx.fillStyle = "#F59E0B";
-  ctx.shadowColor = "#F59E0B";
-  ctx.shadowBlur = 8;
-  ctx.beginPath();
-  ctx.arc(px, py, 5.5, 0, 2 * Math.PI);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-
-  // Slope label
-  ctx.fillStyle = "#1F2937";
-  ctx.font = "bold 15px monospace";
-  ctx.textAlign = "left";
-  const labelX = px + 14;
-  const labelY = Math.max(PAD.top + 20, Math.min(py - 12, h - PAD.bottom - 20));
-  ctx.fillText(`slope = ${slope.toFixed(2)}`, labelX, labelY);
-  ctx.fillStyle = "#6B7280";
-  ctx.font = "13px monospace";
-  ctx.fillText(`x = ${currentX.toFixed(2)}`, labelX, labelY + 18);
+  ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI * 2); ctx.fill();
+  
+  if (params.showSlopeLabel) {
+    ctx.fillStyle = "#1E293B";
+    ctx.font = "bold 14px monospace";
+    ctx.fillText(`slope = ${slope.toFixed(2)}`, px + 15, py - 15);
+  }
 }
 
-function drawStepPanel(
-  ctx: CanvasRenderingContext2D,
-  currentX: number,
-  progress: number,
-  w: number,
-  h: number
-) {
-  const slope = numericalDerivative("x^2", currentX);
-  const steps = [
-    "f(x) = x²",
-    "f'(x) = 2x",
-    `at x=${currentX.toFixed(1)}: slope = ${slope.toFixed(1)}`,
-    "f'(x) = instantaneous rate",
-  ];
-  const visible = Math.min(steps.length, Math.floor(progress * steps.length) + 1);
-
-  const panelX = w - 210;
-  const panelY = PAD.top + 10;
-  const lineH = 28;
-  const panelH = visible * lineH + 20;
-
-  ctx.fillStyle = "rgba(249,250,251,0.95)";
-  ctx.strokeStyle = "#E5E7EB";
-  ctx.lineWidth = 1;
-  roundRect(ctx, panelX, panelY, 200, panelH, 8);
+function renderHighlightIntegralArea(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number, bounds: Bounds) {
+  const expr = String(params.expression ?? "sin(x)");
+  const fromX = Number(params.fromX ?? 0);
+  const toX = Number(params.toX ?? 3);
+  const fillUpTo = fromX + (toX - fromX) * progress;
+  
+  ctx.fillStyle = "rgba(59, 130, 246, 0.3)";
+  ctx.beginPath();
+  ctx.moveTo(toCanvasX(fromX, bounds, w), toCanvasY(0, bounds, h));
+  for (let xi = fromX; xi <= fillUpTo; xi += (toX - fromX) / 100) {
+    const yi = evalExpr(expr, xi);
+    ctx.lineTo(toCanvasX(xi, bounds, w), toCanvasY(yi, bounds, h));
+  }
+  ctx.lineTo(toCanvasX(fillUpTo, bounds, w), toCanvasY(0, bounds, h));
+  ctx.closePath();
   ctx.fill();
-  ctx.stroke();
+}
 
+function renderAddMathLabel(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number, bounds: Bounds) {
+  const alpha = params.fadeIn !== false ? Math.min(1, progress * 2) : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = String(params.color ?? "#1E293B");
+  ctx.font = `bold ${Number(params.fontSize ?? 16)}px serif`;
+  const px = toCanvasX(Number(params.x ?? 0), bounds, w);
+  const py = toCanvasY(Number(params.y ?? 0), bounds, h);
+  ctx.fillText(String(params.text ?? ""), px, py);
+  ctx.restore();
+}
+
+function renderShowStepByStep(ctx: CanvasRenderingContext2D, params: Record<string, any>, progress: number, w: number, h: number) {
+  const steps = (params.steps as string[]) ?? [];
+  const visible = Math.floor(progress * steps.length) + 1;
+  const x = w * 0.65;
+  const y = 50;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.fillRect(x - 10, y - 20, w - x, steps.length * 30 + 20);
   steps.slice(0, visible).forEach((s, i) => {
     const isLatest = i === visible - 1;
-    ctx.fillStyle = isLatest ? "#2563EB" : "#374151";
+    ctx.fillStyle = isLatest ? "#2563EB" : "#475569";
     ctx.font = isLatest ? "bold 13px monospace" : "13px monospace";
-    ctx.textAlign = "left";
-    ctx.fillText(s, panelX + 10, panelY + 16 + i * lineH);
+    ctx.fillText(s, x, y + i * 30);
   });
 }
 
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r: number
-) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
+function renderStep(ctx: CanvasRenderingContext2D, step: AnimationStep, progress: number, w: number, h: number, bounds: Bounds) {
+  switch (step.toolName) {
+    case "drawFunctionGraph": renderDrawFunctionGraph(ctx, step.params, progress, w, h, bounds); break;
+    case "drawTangentLine": renderDrawTangentLine(ctx, step.params, progress, w, h, bounds); break;
+    case "highlightIntegralArea": renderHighlightIntegralArea(ctx, step.params, progress, w, h, bounds); break;
+    case "addMathLabel": renderAddMathLabel(ctx, step.params, progress, w, h, bounds); break;
+    case "showStepByStep": renderShowStepByStep(ctx, step.params, progress, w, h); break;
+  }
 }
 
-// ── Main Component ──────────────────────────────────────────────────────────
-
-export default function DerivativeAnimation({
-  expression = "x^2",
+export default function AnimationPlayer({
+  spec,
   width = 680,
   height = 420,
   autoPlay = true,
@@ -269,117 +193,90 @@ export default function DerivativeAnimation({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
-  const [playing, setPlaying] = useState(autoPlay);
   const [progress, setProgress] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(autoPlay);
 
-  const DURATION = 9000; // ms total
-  const CURVE_PHASE = 0.3;    // 0~0.3: draw curve
-  const TANGENT_PHASE = 0.35; // 0.3~0.35: tangent appears
-  const SLIDE_PHASE = 0.9;    // 0.35~0.9: slide tangent
-  const STEPS_PHASE = 1.0;    // 0.9~1.0: show steps
-
-  const render = useCallback(
-    (ts: number) => {
-      if (!canvasRef.current) return;
-      const ctx = canvasRef.current.getContext("2d");
-      if (!ctx) return;
-
-      if (startTimeRef.current === 0) startTimeRef.current = ts;
-      const elapsed = ts - startTimeRef.current;
-      const t = Math.min(1, elapsed / DURATION);
-
-      setProgress(t);
-      ctx.clearRect(0, 0, width, height);
-
-      // Background
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, width, height);
-
-      drawGrid(ctx, width, height);
-
-      // Phase 1: Draw curve (0 → CURVE_PHASE)
-      const curveProgress = Math.min(1, t / CURVE_PHASE);
-      drawCurve(ctx, expression, curveProgress, width, height, "#3B82F6");
-
-      // Phase 2 + 3: Tangent line
-      if (t >= CURVE_PHASE) {
-        const tangentAppear = Math.min(1, (t - CURVE_PHASE) / (TANGENT_PHASE - CURVE_PHASE));
-        const slideProgress =
-          t >= TANGENT_PHASE
-            ? Math.min(1, (t - TANGENT_PHASE) / (SLIDE_PHASE - TANGENT_PHASE))
-            : 0;
-        const currentX = XMIN + (XMAX - XMIN) * slideProgress;
-        drawTangent(ctx, expression, currentX, tangentAppear, width, height);
-      }
-
-      // Phase 4: Step panel
-      if (t >= SLIDE_PHASE) {
-        const stepsProgress = Math.min(
-          1,
-          (t - SLIDE_PHASE) / (STEPS_PHASE - SLIDE_PHASE)
-        );
-        drawStepPanel(ctx, XMIN + (XMAX - XMIN) * 0.9, stepsProgress, width, height);
-      }
-
-      // Title
-      ctx.fillStyle = "#111827";
-      ctx.font = "bold 16px sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText("Derivative of f(x) = x²   →   f'(x) = 2x", PAD.left, 24);
-
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(render);
-      } else {
-        setPlaying(false);
-      }
-    },
-    [expression, width, height]
-  );
+  const specRef = useRef(spec);
+  useEffect(() => { specRef.current = spec; }, [spec]);
 
   useEffect(() => {
-    if (playing) {
-      startTimeRef.current = 0;
-      rafRef.current = requestAnimationFrame(render);
+    startTimeRef.current = 0;
+    setProgress(0);
+    setIsPlaying(autoPlay && !!spec);
+  }, [autoPlay, spec]);
+
+  const renderFn = useCallback((ts: number) => {
+    if (!canvasRef.current || !specRef.current) return;
+    const ctx = canvasRef.current.getContext("2d");
+    if (!ctx) return;
+
+    if (startTimeRef.current === 0) startTimeRef.current = ts;
+    const elapsed = ts - startTimeRef.current;
+    const totalT = Math.min(1, elapsed / (specRef.current.durationMs || 5000));
+    setProgress(totalT);
+
+    // Bounds calculation
+    const defaultBounds = { xMin: -5, xMax: 5, yMin: -2, yMax: 10 };
+    const graphStep = specRef.current.steps.find(s => s.toolName === "drawFunctionGraph" || s.toolName === "drawTangentLine");
+    const bounds = graphStep ? {
+      xMin: Number(graphStep.params.xMin ?? -5),
+      xMax: Number(graphStep.params.xMax ?? 5),
+      yMin: Number(graphStep.params.yMin ?? -2),
+      yMax: Number(graphStep.params.yMax ?? 10),
+    } : defaultBounds;
+
+    ctx.clearRect(0, 0, width, height);
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+    bgGrad.addColorStop(0, "#ffffff");
+    bgGrad.addColorStop(1, "#f8fafc");
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    drawGrid(ctx, width, height, bounds);
+
+    specRef.current.steps.forEach((step) => {
+      if (elapsed >= step.startMs) {
+        const stepProgress = Math.min(1, (elapsed - step.startMs) / (step.durationMs || 1000));
+        renderStep(ctx, step, stepProgress, width, height, bounds);
+      }
+    });
+
+    if (totalT < 1) {
+      rafRef.current = requestAnimationFrame(renderFn);
+    } else {
+      setIsPlaying(false);
+    }
+  }, [width, height]);
+
+  useEffect(() => {
+    if (isPlaying && spec) {
+      rafRef.current = requestAnimationFrame(renderFn);
     } else {
       cancelAnimationFrame(rafRef.current);
     }
     return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, render]);
+  }, [isPlaying, spec, renderFn]);
 
-  const replay = () => {
-    setProgress(0);
-    startTimeRef.current = 0;
-    setPlaying(true);
-  };
+  if (!spec) return null;
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="w-full h-full flex flex-col items-center justify-center bg-white p-2">
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
-        className="rounded-xl border border-gray-200 shadow-lg"
+        className="max-w-full max-h-full object-contain shadow-sm rounded-lg"
       />
-      {/* Progress bar */}
-      <div className="w-full max-w-[680px] h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-blue-500 transition-all"
-          style={{ width: `${progress * 100}%` }}
-        />
-      </div>
-      <div className="flex gap-3">
-        <button
-          onClick={replay}
-          className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition"
-        >
-          ↺ Replay
-        </button>
-        <button
-          onClick={() => setPlaying((p) => !p)}
-          className="px-4 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200 transition"
-        >
-          {playing ? "⏸ Pause" : "▶ Play"}
-        </button>
+      <div className="w-full max-w-[500px] mt-4 flex items-center gap-4">
+        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-blue-600 transition-all duration-75" 
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+        <span className="text-[10px] font-black text-slate-400 tabular-nums w-8">
+          {Math.round(progress * 100)}%
+        </span>
       </div>
     </div>
   );

@@ -1,220 +1,186 @@
-# AnimAgent — Product Specification
+# AnimAgent — 产品规范
 
-> **Product**: AnimAgent MVP  
-> **Parent Product**: VideoTutor  
-> **Target User**: SAT/AP High School Students (US, 15–18 years old)  
-> **Version**: 1.0  
-> **Date**: 2026-04-29
-
----
-
-## 1. Problem Statement
-
-### The Core Pain Point
-
-80% of SAT Math and AP Calculus content involves **visual concepts** — graphs, slopes, areas, transformations. Traditional AI tutors answer these questions with text or static images.
-
-**Text can explain a derivative. An animation _shows_ it.**
-
-When a student asks "why does f'(x) = 2x for f(x) = x²?", they need to _see_ the tangent line slide along the parabola and watch the slope readout change in real time. No amount of LaTeX solves that.
-
-### Market Opportunity
-
-- ~2.6 million students take SAT annually; 37% pay for prep (~$69/month)
-- AP Calculus AB/BC: ~450K test-takers per year
-- Existing tools (Khan Academy, ChatGPT, Wolfram Alpha) are either static or text-first
-- VideoTutor's animated approach is fundamentally differentiated
+> **产品**: AnimAgent MVP  
+> **目标用户**: SAT/AP 高中生 (15–18 岁)  
+> **版本**: 1.0  
+> **日期**: 2026-04-29
 
 ---
 
-## 2. Product Vision
+## 1. 问题陈述
 
-> **One sentence**: Ask any math question; get a personalized, animated explanation in under 10 seconds.
+### 核心痛点
 
-AnimAgent is the generation engine behind that promise. It is not a user-facing product itself — it is the AI infrastructure that makes VideoTutor's 1-sentence-to-video experience possible.
+80% 的 SAT 数学和 AP 微积分内容涉及 **视觉概念** —— 图表、斜率、面积、变换。传统的 AI 辅导老师通常通过文字或静态图像来回答这些问题。
+
+**文字可以解释导数，而动画能直观地*展示*它。**
+
+当学生问“为什么对于 f(x) = x²，f'(x) = 2x？”时，他们需要看到切线沿抛物线滑动，并实时观察斜率读数的变化。再多的 LaTeX 公式也无法解决这个问题。
+
+
+## 2. 产品愿景
+
+> **一句话总结**：输入任何数学问题，在 10 秒内获得个性化的动画讲解。
+
+AnimAgent 是实现这一承诺背后的生成引擎
 
 ---
 
-## 3. User Stories
+## 3. 用户故事
 
-### Primary User: Student studying for SAT Math
+### 主要用户：正在备考 SAT 数学的学生
 
-| # | Story | Acceptance Criteria |
+| # | 故事 | 验收标准 |
 |---|---|---|
-| US-1 | "As a student, I want to type a math question and immediately see an animation" | Animation plays within 8s of submit |
-| US-2 | "I want the animation to pause and replay so I can re-watch confusing parts" | Play/pause/replay controls work |
-| US-3 | "I want to understand what the animation is showing me" | Narration script displayed alongside |
-| US-4 | "I want to ask follow-up questions about the same concept" | Input resets but animation history remains |
+| US-1 | “作为一名学生，我希望输入一个数学问题并立即看到动画” | 提交后 8 秒内播放动画 |
+| US-2 | “我希望动画可以暂停和重播，以便我可以重新观看令人困惑的部分” | 播放/暂停/重播控制功能正常工作 |
+| US-3 | “我希望理解动画向我展示的内容” | 旁边显示讲解脚本 |
+| US-4 | “我希望针对同一个概念提出后续问题” | 输入框重置但动画历史保留 |
 
-### Secondary User: Content Engineer at VideoTutor
 
-| # | Story | Acceptance Criteria |
-|---|---|---|
-| US-5 | "I want to see how many attempts the AI needed to generate correctly" | Metrics panel shows pass@1, attempts |
-| US-6 | "I want to inspect the underlying AnimationSpec" | JSON inspector toggle works |
-| US-7 | "I want the system to auto-fix generation errors without my intervention" | Auto-retry loop handles ≥90% of errors |
+## 4. 功能范围 (MVP)
+
+### 包含在内 ✅
+
+| 功能 | 描述 |
+|---|---|
+| **文本输入** | 自由格式的自然语言问题 |
+| **示例提示词** | 4 个可点击的 SAT/AP 示例，用于新手引导 |
+| **核心动画：导数** | f(x)=x² 的切线滑动动画 |
+| **动画控制** | 播放 / 暂停 / 重播 |
+| **进度条** | 视觉时间线指示器 |
+| **生成指标** | Pass@1、尝试次数、持续时间、模式 |
+| **讲解脚本** | 编号的配音文案 |
+| **AnimationSpec 查看器** | 用于查看生成规范的 JSON 查看器 |
+| **自动修复循环** | 最多 3 次尝试，并进行错误注入 |
+
+### 不包含在内 ❌ (未来计划)
+
+| 功能 | 推迟原因 |
+|---|---|
+| 语音旁白 (TTS) | 需要额外的 API 集成 |
+| 视频导出 (MP4) | 需要 Remotion 流水线 |
+| 多种动画 (不仅仅是导数) | 需要扩展组件库 |
+| 用户账户 / 历史记录 | 认证基础设施超出 MVP 范围 |
+| 移动端响应式布局 | MVP 阶段以桌面端优先 |
 
 ---
 
-## 4. Feature Scope (MVP)
-
-### In Scope ✅
-
-| Feature | Description |
-|---|---|
-| **Text Input** | Free-form natural language question |
-| **Example Prompts** | 4 clickable SAT/AP examples for onboarding |
-| **Core Animation: Derivative** | Tangent line sliding animation for f(x)=x² |
-| **Animation Controls** | Play / Pause / Replay |
-| **Progress Bar** | Visual timeline indicator |
-| **Generation Metrics** | Pass@1, attempts, duration, mode |
-| **Narration Script** | Numbered voice-over lines |
-| **AnimationSpec Inspector** | JSON viewer for generated spec |
-| **Demo Mode** | Works without OpenAI API key (mock spec) |
-| **Auto-fix Loop** | Up to 3 attempts with error injection |
-
-### Out of Scope ❌ (Future)
-
-| Feature | Reason Deferred |
-|---|---|
-| Voice narration (TTS) | Requires additional API integration |
-| Video export (MP4) | Needs Remotion pipeline |
-| Multiple animations (not just derivative) | Component library expansion needed |
-| User accounts / history | Auth infrastructure out of MVP scope |
-| Mobile-responsive layout | Desktop-first for MVP |
-
----
-
-## 5. Core User Flow
+## 5. 核心用户流程
 
 ```
-1. Student opens VideoTutor
+1. 学生打开当前产品
         │
         ▼
-2. Sees input box + 4 example prompts
-   "Show how the derivative of x² equals 2x"
+2. 看到输入框 + 4 个示例提示词
+   “展示 x² 的导数如何等于 2x”
         │
         ▼
-3. Types or clicks a prompt → Hits "Generate"
+3. 输入或点击提示词 → 点击“生成”
         │
         ▼
-4. Loading state (≤8s)
-   AnimAgent pipeline: Parse → Generate → Validate → Execute
+4. 加载状态 (≤8s)
+   AnimAgent 流水线：解析 → 生成 → 验证 → 执行
         │
         ▼
-5. Animation auto-plays
-   - Parabola draws in (0–2.7s)
-   - Tangent appears and slides (2.7–8.1s)
-   - Step-by-step panel (8.1–9s)
+5. 动画自动播放
+   - 绘制抛物线 (0–2.7s)
+   - 切线出现并滑动 (2.7–8.1s)
+   - 逐步推导面板出现 (8.1–9s)
         │
         ▼
-6. Student reads narration script alongside
-   Can pause, replay, or ask a new question
+6. 学生阅读旁边的讲解脚本
+   可以暂停、重播或提出新问题
 ```
 
 ---
 
-## 6. The Four-Phase Animation (Derivative of x²)
+## 6. 四阶段动画 (x² 的导数)
 
-This is the single animation implemented in MVP. It is deliberately chosen because:
+这是 MVP 中实现的唯一动画。之所以选择它，是因为：
 
-1. **Most common SAT/AP question type**: Derivatives appear in ~35% of AP Calc questions
-2. **Hardest to explain with text**: The concept of "instantaneous rate of change" requires motion
-3. **Demonstrates all animation primitives**: Curve drawing, moving point, dynamic labels, step text
+1. **最常见的 SAT/AP 问题类型**：导数出现在约 35% 的 AP 微积分题目中
+2. **最难用文字解释**：“瞬时变化率”的概念需要动态展示
+3. **展示了所有动画原语**：曲线绘制、移动点、动态标签、步骤文本
 
-### Phase Breakdown
+### 阶段分解
 
-| Phase | Duration | What Happens | Educational Goal |
+| 阶段 | 持续时间 | 发生了什么 | 教学目标 |
 |---|---|---|---|
-| **Draw Curve** | 0–2.7s | Blue parabola animates in L→R | Establish f(x) = x² |
-| **Tangent Appears** | 2.7–3.2s | Yellow tangent line fades in at x=−4 | Introduce tangent concept |
-| **Slope Slides** | 3.2–8.1s | Tangent point moves x: −4→+4, slope label updates live | Show f'(x) = 2x pattern |
-| **Step Panel** | 8.1–9s | f(x)=x², f'(x)=2x, slope=2x appear sequentially | Algebraic reinforcement |
+| **绘制曲线** | 0–2.7s | 蓝色抛物线从左到右动画绘制 | 建立 f(x) = x² 的概念 |
+| **切线出现** | 2.7–3.2s | 黄色切线在 x=−4 处淡入 | 引入切线概念 |
+| **斜率滑动** | 3.2–8.1s | 切线点沿 x: −4→+4 移动，斜率标签实时更新 | 展示 f'(x) = 2x 的规律 |
+| **步骤面板** | 8.1–9s | f(x)=x², f'(x)=2x, slope=2x 依次出现 | 代数强化 |
 
-### Visual Design Decisions
+### 视觉设计决策
 
-| Element | Color | Rationale |
+| 元素 | 颜色 | 理由 |
 |---|---|---|
-| Function curve | `#3B82F6` (Blue-500) | Trust, math association |
-| Tangent line | `#F59E0B` (Amber-400) | Contrast on blue, attention-drawing |
-| Slope label | `#1F2937` (Gray-900) | Readable, neutral |
-| Step panel highlight | `#2563EB` (Blue-600) | Current step emphasis |
-| Background | White | Clean, no visual noise |
+| 函数曲线 | `#3B82F6` (Blue-500) | 信任感，数学关联 |
+| 切线 | `#F59E0B` (Amber-400) | 在蓝色上形成对比，吸引注意力 |
+| 斜率标签 | `#1F2937` (Gray-900) | 易读，中性 |
+| 步骤面板高亮 | `#2563EB` (Blue-600) | 强调当前步骤 |
+| 背景 | 白色 | 洁净，无视觉干扰 |
 
 ---
 
-## 7. AnimationSpec Contract
+## 7. AnimationSpec 契约
 
-The AnimationSpec is the "source of truth" that connects LLM output to the renderer. It is:
+AnimationSpec 是连接 LLM 输出和渲染器的“唯一真理来源”。它是：
 
-- **LLM-generated**: AnimAgent produces it via structured JSON output
-- **Validated**: 3-level validation before rendering
-- **Renderer-consumed**: The Canvas renderer reads it frame-by-frame
-- **Human-readable**: Engineers can inspect it in the JSON panel
+- **LLM 生成的**：AnimAgent 通过结构化 JSON 输出产生它
+- **经过验证的**：在渲染前进行 3 级验证
+- **渲染器使用的**：Canvas 渲染器逐帧读取它
+- **人类可读的**：工程师可以在 JSON 面板中检查它
 
-This contract is what makes the system extensible: add a new tool to the registry, add it to the system prompt, and the LLM can immediately use it.
+这种契约为系统的可扩展性提供了保障：在注册表中添加一个新工具，将其添加到系统提示词中，LLM 就可以立即使用它。
 
----
-
-## 8. Demo Mode
-
-When `OPENAI_API_KEY` is not set, the system operates in Demo Mode:
-
-- Returns a hardcoded `AnimationSpec` for the derivative example
-- All UI features work identically
-- Metrics panel shows `Mode: Demo (no API key)`
-- Allows product demos and screenshots without API cost
-
-This was designed deliberately for:
-1. Portfolio demonstrations
-2. CI/CD testing without API costs
-3. Onboarding new developers
 
 ---
 
-## 9. Success Metrics
+## 9. 成功指标
 
-### Quantitative
+### 定量指标
 
-| Metric | MVP Target | How Measured |
+| 指标 | MVP 目标 | 如何测量 |
 |---|---|---|
-| First-attempt success rate | ≥70% | `pass1Success` flag in API response |
-| End-to-end latency | ≤8s | `totalDurationMs` |
-| Error auto-recovery rate | ≥90% | `totalAttempts ≤ 3` for successful runs |
-| Animation frame rate | 60fps | `requestAnimationFrame` timing |
+| 首次尝试成功率 | ≥70% | API 响应中的 `pass1Success` 标志 |
+| 端到端延迟 | ≤8s | `totalDurationMs` |
+| 错误自动恢复率 | ≥90% | 成功运行的 `totalAttempts ≤ 3` |
+| 动画帧率 | 60fps | `requestAnimationFrame` 计时 |
 
-### Qualitative (User Research)
+### 定性指标 (用户调研)
 
-- "Did the animation help you understand the concept?" (1–5 scale, target: ≥4)
-- "Would you use this instead of watching a YouTube tutorial?" (Y/N, target: ≥60% Y)
-
----
-
-## 10. Comparison: Before vs. After AnimAgent
-
-| Scenario | Without AnimAgent | With AnimAgent |
-|---|---|---|
-| "Why is f'(x²) = 2x?" | Text explanation with LaTeX | 9-second animation with sliding tangent |
-| Wrong first generation | Manual fix by engineer | Auto-retry with error injection |
-| New concept support | New codebase per concept | Add one tool to registry + 1 few-shot |
-| Animation quality control | Manual review | 3-level automated validation |
-| Latency | N/A | ≤8s end-to-end |
+- “动画是否帮助你理解了该概念？” (1–5 分，目标：≥4)
+- “你会用这个代替观看 YouTube 教程吗？” (是/否，目标：≥60% 是)
 
 ---
 
-## 11. Appendix: SAT/AP Content Coverage Map
+## 10. 对比：使用 AnimAgent 前后
 
-Planned tool expansion to cover VideoTutor's full content scope:
-
-| SAT/AP Topic | Tool Needed | Priority |
+| 场景 | 不使用 AnimAgent | 使用 AnimAgent |
 |---|---|---|
-| Derivatives (slopes) | `drawTangentLine` ✅ | P0 — In MVP |
-| Function graphs | `drawFunctionGraph` ✅ | P0 — In MVP |
-| Definite integrals | `highlightIntegralArea` ✅ | P0 — In MVP |
-| Algebra steps | `showStepByStep` ✅ | P0 — In MVP |
-| Limits | `drawLimitApproach` | P1 |
-| Geometric transformations | `applyTransformation` | P1 |
-| Trigonometry unit circle | `drawUnitCircle` | P1 |
-| 3D surfaces | `drawSurface3D` | P2 |
-| Probability distributions | `drawNormalCurve` | P2 |
-| Matrix operations | `animateMatrix` | P2 |
+| “为什么 f'(x²) = 2x？” | 带有 LaTeX 的文字解释 | 带有滑动切线的 9 秒动画 |
+| 首次生成错误 | 工程师手动修复 | 带有错误注入的自动重试 |
+| 支持新概念 | 每个概念都需要新代码库 | 在注册表中添加一个工具 + 1 个少样本示例 |
+| 动画质量控制 | 手动审核 | 3 级自动化验证 |
+| 延迟 | 不适用 | 端到端 ≤8s |
+
+---
+
+## 11. 附录：SAT/AP 内容覆盖图
+
+计划扩展工具：
+
+| SAT/AP 主题 | 所需工具 | 优先级 |
+|---|---|---|
+| 导数 (斜率) | `drawTangentLine` ✅ | P0 — MVP 已包含 |
+| 函数图表 | `drawFunctionGraph` ✅ | P0 — MVP 已包含 |
+| 定积分 | `highlightIntegralArea` ✅ | P0 — MVP 已包含 |
+| 代数步骤 | `showStepByStep` ✅ | P0 — MVP 已包含 |
+| 极限 | `drawLimitApproach` | P1 |
+| 几何变换 | `applyTransformation` | P1 |
+| 三角函数单位圆 | `drawUnitCircle` | P1 |
+| 3D 曲面 | `drawSurface3D` | P2 |
+| 概率分布 | `drawNormalCurve` | P2 |
+| 矩阵运算 | `animateMatrix` | P2 |

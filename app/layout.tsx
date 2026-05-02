@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "AnimAgent — Math Animations by VideoTutor",
+  title: "AnimAgent — AI Math Animations",
   description:
     "AI-powered math animation generator for SAT/AP students. " +
     "Type a concept, get an animated explanation instantly.",
