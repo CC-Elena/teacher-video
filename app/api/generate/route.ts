@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { AnimAgent } from "@/lib/agent/animAgent";
 import { getDemoSpec } from "@/lib/agent/demoSpec";
 import { generateAnimationCode } from "@/lib/agent/codeGenerator";
+import { checkRateLimit } from "@/lib/server/rateLimit";
+import {
+  createGenerationEvent,
+  recordFineTuneExample,
+  recordGenerationEvent,
+} from "@/lib/server/telemetry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -70,7 +76,75 @@ function createDemoResult(userInput: string, startedAt: number) {
   };
 }
 
+function getClientKey(req: NextRequest) {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || req.headers.get("x-real-ip") || "local";
+}
+
+function selectProvider() {
+  let apiKey = process.env.OPENAI_API_KEY;
+  let baseURL = process.env.OPENAI_BASE_URL;
+  let model = process.env.OPENAI_MODEL || "gpt-4o";
+  let provider = "openai";
+
+  if (process.env.NVIDIA_API_KEY) {
+    apiKey = process.env.NVIDIA_API_KEY;
+    baseURL = "https://integrate.api.nvidia.com/v1";
+    model = process.env.NVIDIA_MODEL || "meta/llama-3.1-405b-instruct";
+    provider = "nvidia";
+  } else if (process.env.DEEPSEEK_API_KEY) {
+    apiKey = process.env.DEEPSEEK_API_KEY;
+    baseURL = "https://api.deepseek.com";
+    model = "deepseek-chat";
+    provider = "deepseek";
+  }
+
+  return { apiKey, baseURL, model, provider };
+}
+
+function rememberGeneration(userInput: string, result: any, provider: string) {
+  if (!result?.spec || !result?.metrics) return;
+  const event = createGenerationEvent({
+    userInput,
+    spec: result.spec,
+    demoMode: !!result.demoMode,
+    provider,
+    status: result.demoMode ? "fallback" : "success",
+    metrics: result.metrics,
+  });
+
+  void Promise.all([
+    recordGenerationEvent(event),
+    recordFineTuneExample({
+      userInput,
+      spec: result.spec,
+      demoMode: !!result.demoMode,
+      metrics: result.metrics,
+    }),
+  ]).catch((error) => {
+    console.warn("[Telemetry]", error);
+  });
+}
+
 export async function POST(req: NextRequest) {
+  const rateLimit = checkRateLimit(getClientKey(req));
+  if (rateLimit.limited) {
+    return NextResponse.json(
+      {
+        error: "Too many generation requests. Please wait before trying again.",
+        resetAt: rateLimit.resetAt,
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": `${rateLimit.retryAfterSeconds}`,
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": `${rateLimit.resetAt}`,
+        },
+      }
+    );
+  }
+
   const { userInput, maxAttempts = 3, lang = "zh" } = await req.json();
 
   if (!userInput || typeof userInput !== "string") {
@@ -91,20 +165,7 @@ export async function POST(req: NextRequest) {
         controller.close();
       };
       const startedAt = Date.now();
-
-      let apiKey = process.env.OPENAI_API_KEY;
-      let baseURL = process.env.OPENAI_BASE_URL;
-      let model = process.env.OPENAI_MODEL || "gpt-4o";
-
-      if (process.env.NVIDIA_API_KEY) {
-        apiKey = process.env.NVIDIA_API_KEY;
-        baseURL = "https://integrate.api.nvidia.com/v1";
-        model = process.env.NVIDIA_MODEL || "meta/llama-3.1-405b-instruct";
-      } else if (process.env.DEEPSEEK_API_KEY) {
-        apiKey = process.env.DEEPSEEK_API_KEY;
-        baseURL = "https://api.deepseek.com";
-        model = "deepseek-chat";
-      }
+      const { apiKey, baseURL, model, provider } = selectProvider();
 
       if (!apiKey || apiKey === "your_openai_api_key_here") {
         send({
@@ -113,7 +174,9 @@ export async function POST(req: NextRequest) {
             ? "未找到可用 API Key，切换到本地演示动画。"
             : "No valid API key found; using a local demo animation.",
         });
-        send({ type: "result", ...createDemoResult(userInput, startedAt) });
+        const demoResult = createDemoResult(userInput, startedAt);
+        send({ type: "result", ...demoResult });
+        rememberGeneration(userInput, demoResult, provider);
         close();
         return;
       }
@@ -131,6 +194,7 @@ export async function POST(req: NextRequest) {
           timeoutAfter(GENERATION_TIMEOUT_MS),
         ]);
         send({ type: "result", ...result });
+        rememberGeneration(userInput, result, provider);
       } catch (err) {
         console.error("[AnimAgent]", err);
         const classified = classifyGenerationError(err);
@@ -139,7 +203,9 @@ export async function POST(req: NextRequest) {
           type: "log",
           message: lang === "zh" ? classified.zh : classified.en,
         });
-        send({ type: "result", ...createDemoResult(userInput, startedAt) });
+        const demoResult = createDemoResult(userInput, startedAt);
+        send({ type: "result", ...demoResult });
+        rememberGeneration(userInput, demoResult, provider);
       } finally {
         close();
       }
@@ -151,6 +217,8 @@ export async function POST(req: NextRequest) {
       "Content-Type": "application/x-ndjson",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
+      "X-RateLimit-Remaining": `${rateLimit.remaining}`,
+      "X-RateLimit-Reset": `${rateLimit.resetAt}`,
     },
   });
 }

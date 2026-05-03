@@ -196,6 +196,11 @@ export default function HomePage() {
         signal: controller.signal,
       });
 
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || `Request failed with status ${response.status}`);
+      }
+
       if (!response.body) throw new Error("No response body");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -247,20 +252,20 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen pro-gradient overflow-hidden">
+    <main className="min-h-screen pro-gradient overflow-x-hidden">
       {/* Header */}
-      <header className="border-b border-slate-200 bg-white/60 backdrop-blur-md h-16 flex items-center shrink-0 z-50">
-        <div className="max-w-[1600px] w-full mx-auto px-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+      <header className="border-b border-slate-200 bg-white/60 backdrop-blur-md min-h-16 flex items-center shrink-0 z-50">
+        <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 shrink-0">
               <span className="font-black text-lg italic">A</span>
             </div>
-            <div>
-              <span className="font-bold text-slate-900 text-lg tracking-tight block leading-none">{t.title}</span>
-              <span className="text-[9px] font-bold text-blue-500 uppercase tracking-[0.2em]">{t.subtitle}</span>
+            <div className="min-w-0">
+              <span className="font-bold text-slate-900 text-base sm:text-lg tracking-tight block leading-none truncate">{t.title}</span>
+              <span className="text-[9px] font-bold text-blue-500 uppercase tracking-[0.2em] block truncate">{t.subtitle}</span>
             </div>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 lg:gap-6 shrink-0">
             <div className="hidden md:flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 text-green-600 border border-green-100">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -280,26 +285,26 @@ export default function HomePage() {
       </header>
 
       {/* Main Container: Fixed height to fit screen */}
-      <div className="max-w-[1600px] mx-auto px-8 py-6 h-[calc(100vh-64px)]">
-        <div className="flex flex-col lg:flex-row gap-8 h-full items-stretch">
+      <div className="max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 lg:py-6 min-h-[calc(100vh-64px)] lg:h-[calc(100vh-64px)]">
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-8 h-full items-stretch">
           
           {/* Left Column: Input + Video (Same height as right) */}
-          <div className="flex-1 flex flex-col gap-6 min-h-0">
+          <div className="flex-1 flex flex-col gap-4 lg:gap-6 min-h-0">
             
             {/* Input Area (Compact) */}
-            <div className="glass-card p-5 relative overflow-hidden shrink-0">
-              <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-6">
+            <div className="glass-card p-4 lg:p-5 relative overflow-hidden shrink-0">
+              <div className="relative z-10 flex flex-col xl:flex-row xl:items-center gap-4 lg:gap-6">
                 <div className="flex-1 shrink-0">
-                  <h1 className="text-2xl font-black text-slate-900 mb-1 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600">
+                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 mb-1 tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600">
                     {t.heroTitle}
                   </h1>
-                  <p className="text-slate-500 text-xs leading-relaxed line-clamp-1">
+                  <p className="text-slate-500 text-xs leading-relaxed md:line-clamp-1">
                     {t.heroSubtitle}
                   </p>
                 </div>
 
-                <div className="flex-[1.5] max-w-xl flex flex-col gap-3">
-                  <div className="flex gap-2 p-1 bg-slate-100/50 rounded-xl border border-slate-200/60 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
+                <div className="flex-[1.5] w-full xl:max-w-xl flex flex-col gap-3">
+                  <div className="flex flex-col sm:flex-row gap-2 p-1 bg-slate-100/50 rounded-xl border border-slate-200/60 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
                     <input
                       className="flex-1 px-4 py-2 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
                       placeholder={t.inputPlaceholder}
@@ -311,7 +316,7 @@ export default function HomePage() {
                     <button
                       onClick={() => handleGenerate()}
                       disabled={loading || !input.trim()}
-                      className="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 min-w-[100px]"
+                      className="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 active:scale-95 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 sm:min-w-[100px]"
                     >
                       {loading ? t.thinkingBtn : t.generateBtn}
                     </button>
@@ -378,9 +383,9 @@ export default function HomePage() {
             )}
 
             {/* Video Area (Flexible) */}
-            <div className="glass-card p-2 overflow-hidden flex-1 flex flex-col min-h-0">
+            <div className="glass-card p-2 overflow-hidden flex-1 flex flex-col min-h-[330px] sm:min-h-[430px] lg:min-h-0">
               <div className="bg-slate-900 rounded-[20px] overflow-hidden flex-1 flex flex-col relative">
-                <div className="px-5 py-3 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 shrink-0">
+                <div className="px-3 sm:px-5 py-3 flex items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/50 shrink-0">
                   <div className="flex items-center gap-2">
                     <div className="flex gap-1 mr-3">
                       <div className="w-2 h-2 rounded-full bg-red-500/40" />
@@ -392,12 +397,12 @@ export default function HomePage() {
                     </span>
                   </div>
                   {result?.spec && (
-                    <div className="px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-bold uppercase tracking-wider">
+                    <div className="px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-bold uppercase tracking-wider truncate max-w-[150px] sm:max-w-[260px]">
                       {result.spec.concept}
                     </div>
                   )}
                 </div>
-                <div className="flex-1 bg-[#1a1a1a] relative min-h-0 flex items-center justify-center p-6">
+                <div className="flex-1 bg-[#1a1a1a] relative min-h-0 flex items-center justify-center p-3 sm:p-6">
                   <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.3)_100%)] z-10" />
                   <div className="w-full h-full max-w-full max-h-full aspect-video shadow-2xl rounded-lg overflow-hidden border border-white/5">
                     {loading ? (
@@ -422,8 +427,8 @@ export default function HomePage() {
 
                 {/* Subtitles Overlay (Optional UI touch) */}
                 {result?.spec && (
-                  <div className="absolute bottom-6 left-0 right-0 z-20 px-10 text-center pointer-events-none">
-                    <p className="inline-block px-4 py-2 bg-black/60 backdrop-blur-md rounded-xl text-white text-sm font-medium border border-white/10 shadow-xl">
+                  <div className="absolute bottom-4 sm:bottom-6 left-0 right-0 z-20 px-4 sm:px-10 text-center pointer-events-none">
+                    <p className="inline-block max-w-full px-3 sm:px-4 py-2 bg-black/60 backdrop-blur-md rounded-xl text-white text-xs sm:text-sm font-medium border border-white/10 shadow-xl truncate">
                       {result.spec.concept} — {t.animationPreview}
                     </p>
                   </div>
@@ -457,7 +462,7 @@ export default function HomePage() {
                 </div>
                 <div className="flex gap-4 overflow-x-auto pb-1 custom-scrollbar scrollbar-thin">
                   {result.spec.narration.map((line, i) => (
-                    <div key={i} className="flex-none w-[260px] p-3 rounded-xl bg-slate-50 border border-slate-100 relative group hover:border-blue-200 transition-colors">
+                    <div key={i} className="flex-none w-[220px] sm:w-[260px] p-3 rounded-xl bg-slate-50 border border-slate-100 relative group hover:border-blue-200 transition-colors">
                       <span className="text-[9px] font-black text-blue-500/20 absolute top-2 right-3 italic">
                         {i === 0 ? (lang === "zh" ? "引入" : "HOOK") : i === result.spec!.narration.length - 1 ? (lang === "zh" ? "总结" : "WRAP") : (lang === "zh" ? "演示" : "DEMO")}
                       </span>
@@ -472,7 +477,7 @@ export default function HomePage() {
           </div>
 
           {/* Right Column: Agent Inspector (Same height as Left) */}
-          <div className="w-full lg:w-[400px] shrink-0 h-full flex flex-col gap-4">
+          <div className="w-full lg:w-[400px] shrink-0 min-h-[520px] lg:min-h-0 lg:h-full flex flex-col gap-4">
             <div className="glass-card overflow-hidden flex-1 border border-slate-200/60 shadow-2xl">
               <AgentInspector 
                 status={agentStatus}
